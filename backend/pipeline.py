@@ -1,5 +1,7 @@
 """The Faceless AI Reels render pipeline: script -> voice -> captions -> render."""
 import asyncio
+import base64
+import json
 import os
 import re
 import shutil
@@ -378,3 +380,111 @@ async def extract_thumbnail(video_path: str, out_path: str) -> None:
 
 def new_workdir() -> str:
     return tempfile.mkdtemp(prefix="reel_")
+
+
+# ---------------------------------------------------------------------------
+# AI Visuals: scene image prompts -> Gemini images -> Ken Burns background
+# ---------------------------------------------------------------------------
+def scene_count(seconds: int) -> int:
+    return max(2, min(4, round((seconds or 30) / 10)))
+
+
+async def generate_scene_prompts(script: str, n: int) -> list:
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"prompts-{abs(hash(script)) % 100000}",
+        system_message="You turn video scripts into vivid cinematic image prompts.",
+    ).with_model("openai", "gpt-5.4")
+    ask = (
+        f"For this short video narration, write exactly {n} vivid image-generation prompts, "
+        f"one per key beat, that visually support the story. Cinematic, photographic, dramatic "
+        f"lighting, vertical 9:16 composition. Do NOT include any text/words/letters in the image. "
+        f"Keep a consistent visual style across all prompts.\n\n"
+        f"Narration:\n{script}\n\n"
+        f"Return ONLY a JSON array of {n} strings."
+    )
+    raw = await chat.send_message(UserMessage(text=ask))
+    prompts = []
+    try:
+        m = re.search(r"\[.*\]", raw, re.DOTALL)
+        prompts = json.loads(m.group(0)) if m else []
+    except Exception:
+        prompts = []
+    prompts = [str(p).strip() for p in prompts if str(p).strip()][:n]
+    while len(prompts) < n:
+        prompts.append(f"Cinematic dramatic vertical scene illustrating: {script[:120]}")
+    return prompts
+
+
+async def generate_images(prompts: list, workdir: str) -> list:
+    paths = []
+    for i, prompt in enumerate(prompts):
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"img-{i}-{abs(hash(prompt)) % 100000}",
+            system_message="You are an image generation assistant.",
+        ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
+        style = " Vertical 9:16 aspect ratio, ultra-detailed, cinematic color grade, no text."
+        _text, images = await chat.send_message_multimodal_response(UserMessage(text=prompt + style))
+        if not images:
+            raise RuntimeError("Image generation returned no image")
+        out = os.path.join(workdir, f"scene_{i}.png")
+        with open(out, "wb") as f:
+            f.write(base64.b64decode(images[0]["data"]))
+        paths.append(out)
+    return paths
+
+
+async def render_video_images(audio_path: str, ass_name: str, image_paths: list, duration: float,
+                              workdir: str, out_path: str, music_id: str = "none",
+                              music_volume: float = MUSIC_VOLUME) -> None:
+    dur = max(1.0, float(duration))
+    n = max(1, len(image_paths))
+    fps = 30
+    seg_sec = dur / n
+
+    inputs = []
+    vlabels = ""
+    for img in image_paths:
+        inputs += ["-loop", "1", "-t", f"{seg_sec:.3f}", "-i", img]
+    for i in range(n):
+        # Ken Burns: cover-crop, fix fps so the clip is finite, slow continuous zoom.
+        vlabels += (
+            f"[{i}:v]scale=1620:2880:force_original_aspect_ratio=increase,crop=1620:2880,"
+            f"fps={fps},zoompan=z='min(1.0+0.0012*on,1.18)':d=1:x='iw/2-(iw/zoom/2)':"
+            f"y='ih/2-(ih/zoom/2)':s=1080x1920,setsar=1[v{i}];"
+        )
+    concat_in = "".join(f"[v{i}]" for i in range(n))
+    vchain = f"{vlabels}{concat_in}concat=n={n}:v=1:a=0[vc];[vc]ass={ass_name}:fontsdir={FONTS_DIR}[v]"
+
+    audio_idx = n
+    inputs += ["-i", audio_path]
+    track = MUSIC_MAP.get(music_id or "none", MUSIC_MAP["none"])
+    music_path = os.path.join(MUSIC_DIR, track["file"]) if track["file"] else None
+    if music_path and os.path.exists(music_path):
+        vol = max(0.0, min(1.0, float(music_volume)))
+        fout = max(0.1, dur - 1.0)
+        inputs += ["-stream_loop", "-1", "-i", music_path]
+        achain = (
+            f"[{audio_idx}:a]volume=1.0[va];"
+            f"[{audio_idx + 1}:a]volume={vol:.3f},afade=t=in:st=0:d=0.8,afade=t=out:st={fout:.2f}:d=1.0[ma];"
+            f"[va][ma]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]"
+        )
+        filter_complex = f"{vchain};{achain}"
+        amap = ["-map", "[v]", "-map", "[aout]"]
+    else:
+        filter_complex = vchain
+        amap = ["-map", "[v]", "-map", f"{audio_idx}:a"]
+
+    cmd = [
+        _ffmpeg_exe(), "-y", *inputs,
+        "-filter_complex", filter_complex, *amap,
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "160k", "-t", f"{dur:.2f}", "-shortest", "-movflags", "+faststart",
+        out_path,
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, cwd=workdir, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg image render failed: {stderr.decode()[-1500:]}")

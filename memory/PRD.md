@@ -74,6 +74,13 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
   **Scheduled Batches** (`POST /reels/batch` accepts `scheduled_at`; reels wait as status `scheduled` until an
   async scheduler_loop promotes them; Batch screen WHEN=Now/Tonight·2AM). Verified via synthetic renders +
   UI screenshots; generation itself gated only by LLM key budget.
+- **Follow-up (2026-08 · batch 7): AI Visuals** — new `visual_mode` ('gradient'|'ai'). In 'ai' mode the
+  backend derives N scene image prompts from the script (gpt-5.4), generates vertical images via Gemini
+  Nano Banana (gemini-3.1-flash-image-preview, Emergent key), then composes them as a Ken-Burns pan/zoom
+  background (`render_video_images`: `-loop 1 -t seg` per image + zoompan d=1 + concat) with captions on top.
+  Create screen has a VISUAL STYLE toggle. Verified: backend 9/9 pytest; ffmpeg image render validated with
+  dummy scenes (scenes advance correctly). NOTE: user's reported "error creating video" = Universal LLM key
+  BUDGET CAP (Max budget 1.4 exceeded), confirmed by testing agent — a credits issue, not a code bug.
 
 ## Backlog
 - P1: multiple caption layout presets; background music track option; ElevenLabs voice option.

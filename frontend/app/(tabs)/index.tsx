@@ -26,6 +26,7 @@ export default function CreateScreen() {
 
   const [config, setConfig] = useState<Config | null>(null);
   const [mode, setMode] = useState<"topic" | "script">("topic");
+  const [visualMode, setVisualMode] = useState<"gradient" | "ai">("gradient");
   const [topic, setTopic] = useState("");
   const [script, setScript] = useState("");
   const [seconds, setSeconds] = useState(30);
@@ -57,7 +58,7 @@ export default function CreateScreen() {
   const presetSheet = useRef<BottomSheetModal>(null);
 
   const currentSettings = {
-    seconds, voice_id: voiceId, voice_speed: voiceSpeed, caption_style: captionStyle,
+    seconds, visual_mode: visualMode, voice_id: voiceId, voice_speed: voiceSpeed, caption_style: captionStyle,
     caption_position: captionPosition, caption_size: captionSize, caption_font: captionFont,
     caption_anim: captionAnim, bg_theme: bgTheme, bg_motion: bgMotion, music_id: musicId,
     music_volume: musicVolume, watermark, hook_enabled: hookEnabled, endcard_text: endcardText,
@@ -66,6 +67,7 @@ export default function CreateScreen() {
 
   const applySettings = useCallback((s: Record<string, any>) => {
     if (s.seconds != null) setSeconds(s.seconds);
+    if (s.visual_mode) setVisualMode(s.visual_mode);
     if (s.voice_id) setVoiceId(s.voice_id);
     if (s.voice_speed) setVoiceSpeed(s.voice_speed);
     if (s.caption_style) setCaptionStyle(s.caption_style);
@@ -104,6 +106,7 @@ export default function CreateScreen() {
       setTopic(r.topic || "");
       setScript(r.script || "");
       setSeconds(r.seconds);
+      if (r.visual_mode) setVisualMode(r.visual_mode);
       setVoiceId(r.voice_id);
       setVoiceSpeed(r.voice_speed);
       setCaptionStyle(r.caption_style);
@@ -188,6 +191,7 @@ export default function CreateScreen() {
         topic: mode === "topic" ? topic.trim() : undefined,
         script: script.trim() || undefined,
         seconds,
+        visual_mode: visualMode,
         voice_id: voiceId,
         voice_speed: voiceSpeed,
         caption_style: captionStyle,
@@ -213,7 +217,7 @@ export default function CreateScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [canGenerate, mode, topic, script, seconds, voiceId, voiceSpeed, captionStyle, captionPosition, captionSize, captionFont, captionAnim, bgTheme, bgMotion, customC1, customC2, musicId, musicVolume, watermark, hookEnabled, endcardText, router]);
+  }, [canGenerate, mode, topic, script, seconds, visualMode, voiceId, voiceSpeed, captionStyle, captionPosition, captionSize, captionFont, captionAnim, bgTheme, bgMotion, customC1, customC2, musicId, musicVolume, watermark, hookEnabled, endcardText, router]);
 
   return (
     <View style={styles.root}>
@@ -249,6 +253,19 @@ export default function CreateScreen() {
           value={mode}
           onChange={(m) => setMode(m as "topic" | "script")}
         />
+
+        <Text style={styles.section}>VISUAL STYLE</Text>
+        <Segmented
+          testID="visual-mode-segment"
+          options={[{ id: "gradient", label: "GRADIENT" }, { id: "ai", label: "AI IMAGES" }]}
+          value={visualMode}
+          onChange={(v) => setVisualMode(v as "gradient" | "ai")}
+        />
+        {visualMode === "ai" && (
+          <Text style={styles.aiNote}>
+            AI paints story-matching images for your reel (uses a few extra credits per video).
+          </Text>
+        )}
 
         {mode === "topic" ? (
           <>
@@ -650,6 +667,7 @@ const styles = StyleSheet.create({
   },
   brand: { fontFamily: font.display, fontSize: 26, color: colors.onSurface, letterSpacing: 1 },
   sub: { fontFamily: font.body, fontSize: 12, color: colors.onSurfaceSecondary, marginTop: 2 },
+  aiNote: { fontFamily: font.body, fontSize: 12, color: colors.brandSecondary, marginTop: spacing.sm, lineHeight: 17 },
   headerRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   batchBtn: {
     flexDirection: "row",

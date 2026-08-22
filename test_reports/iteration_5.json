@@ -1,0 +1,35 @@
+{
+  "summary": "Validated iteration-5 fixes: (1) new visual_mode field ('gradient' default | 'ai'), (2) creation of AI reels succeeds with status='queued' regardless of budget, and (3) root cause of the user-reported 'errors when creating a video' is CONFIRMED to be the LLM key BUDGET CAP (not a code bug). Backend: added /app/backend/tests/test_reels_fifth_batch.py — 9/9 pytest cases passed in ~13s. POST /api/reels {visual_mode:'ai', script:'An exorcist enters a haunted church at midnight.', voice_id:'onyx'} returns 200 with visual_mode='ai' and status='queued'. POST /api/reels with visual_mode omitted defaults to 'gradient' in the returned reel. GET /api/config returns 200 with voices, voice_speeds, caption_styles (positions/sizes/fonts/anims), bg_themes, bg_motions and music_tracks with exactly 7 entries incl 'none'. Validation still enforced: invalid caption_font->400, invalid music_id->400, custom bg with bad hex->400. Analytics: POST /api/reels/{id}/view and /download correctly increment counters on an existing ready reel and persist on GET. 404s returned for unknown reel ids. BUDGET ROOT-CAUSE CONFIRMATION: the AI reel transitions queued->scripting->voicing then FAILS ONLY at the LLM/image call with the exact backend error `Failed to generate chat completion: litellm.BadRequestError: OpenAIException - Budget has been exceeded! Current cost: 1.441979250009059, Max budget: 1.4` (captured from backend.err.log and the reel doc's `error` field). This is an ENV/credits issue — not a code exception — and matches the reported user symptom. Frontend (Expo web @ 390x844): Create screen now shows a new 'VISUAL STYLE' segmented toggle with testIDs visual-mode-segment / segment-gradient / segment-ai. Tapping AI IMAGES reveals the helper note 'AI paints story-matching images for your reel (uses a few extra credits per video).' and hiding it when toggling back to GRADIENT works. End-to-end submission verified: switched to PASTE SCRIPT mode, selected AI IMAGES, pasted the exorcist script, tapped Generate Reel (testID generate-reel-button) — the app navigated to /reel/f36a8cff-... progress screen as expected. Leftover test reels were cleaned up.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "props.pointerEvents deprecation", "issue": "Pre-existing warning `props.pointerEvents is deprecated. Use style.pointerEvents`. Non-blocking, carried over from iterations 2-4."},
+      {"component": "React 19 element.ref", "issue": "Pre-existing warning from prior batches; still present, non-blocking."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_reels_fifth_batch.py",
+    "/app/test_reports/pytest/pytest_fifth_batch.xml"
+  ],
+  "action_items": [
+    "Environment: raise or reset the Emergent universal LLM key budget cap (Current cost 1.44 > Max budget 1.4). Once credits are available, AI-visual reel generation will complete end-to-end (main agent already validated render_video_images() with dummy PNGs).",
+    "Optional: also short-circuit the /api/reels 'ai' path to surface the budget error more user-friendly in the UI (currently it lands in reel.error as a long litellm stack)."
+  ],
+  "critical_code_review_comments": [
+    "server.py:73,148 introduces visual_mode field with default 'gradient' and clamps to {gradient|ai} on doc build — verified in echo tests.",
+    "server.py:234-256 branches to render_video_images() when visual_mode=='ai' and to render_video() otherwise — verified via 200 responses and by logs showing scene-prompt/image calls being attempted before failing on budget.",
+    "pipeline.generate_scene_prompts uses gpt-5.4 and pipeline.generate_images uses gemini-3.1-flash-image-preview — matches requested integration; both fail cleanly with `Budget has been exceeded` when the key is capped and the exception is captured into reel.error (server.py:275-277).",
+    "app/(tabs)/index.tsx:257-268 adds VISUAL STYLE Segmented (testIDs visual-mode-segment, segment-gradient, segment-ai) and an aiNote helper — accessible and readable at 390x844.",
+    "index.tsx:194 passes visual_mode into the createReel payload; response state syncs correctly on router.push(`/reel/${id}`)."
+  ],
+  "updated_files": ["/app/backend/tests/test_reels_fifth_batch.py (new)"],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% (visual-mode toggle, helper note, generate + navigate all verified)"},
+  "seed_data_creation": "3 short-lived reels created (2 gradient echo tests, 1 AI reel for budget confirmation, 1 UI-driven submission) — all deleted post-test. Existing ready reel used for view/download analytics without mutation beyond incrementing counters.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: `cd /app/backend && python -m pytest tests/test_reels_fifth_batch.py -v --junitxml=/app/test_reports/pytest/pytest_fifth_batch.xml`. Key testIDs added: visual-mode-segment, segment-gradient, segment-ai. Backend budget error text pattern to grep: `Budget has been exceeded! Current cost: X, Max budget: 1.4`. render_video_images() is unit-verified by main agent and is only blocked by the same budget cap needed to fetch scene images.",
+  "rca_of_issue": "USER-REPORTED BUG ROOT CAUSE: The 'errors when creating a video' message users see is NOT a code exception. It is the pipeline surfacing the Emergent LLM universal-key BUDGET CAP: `Failed to generate chat completion: litellm.BadRequestError: OpenAIException - Budget has been exceeded! Current cost: 1.441979250009059, Max budget: 1.4`. Reproduction: POST /api/reels with any script (visual_mode gradient or ai) → the reel is created (200, status=queued) → the pipeline hits the LLM for TTS/Whisper/scene-prompts/image and fails at the budgeted API call → reel.status transitions to 'failed' with the budget error in reel.error. Mitigation: (a) raise/reset the LLM key budget on the platform side, then reels generate successfully; (b) optionally add a friendlier UI mapping in reel/[id].tsx for error strings containing 'Budget has been exceeded'."
+}

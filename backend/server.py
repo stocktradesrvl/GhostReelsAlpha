@@ -70,6 +70,7 @@ class ScriptRequest(BaseModel):
 
 class ReelSettings(BaseModel):
     seconds: int = 30
+    visual_mode: str = "gradient"       # "gradient" | "ai"
     voice_id: str = "onyx"
     voice_speed: str = "normal"
     caption_style: str = "signal"
@@ -101,7 +102,7 @@ class BatchReelRequest(ReelSettings):
 
 
 PUBLIC_FIELDS = {
-    "id", "title", "input_mode", "topic", "script", "seconds", "voice_id", "voice_speed",
+    "id", "title", "input_mode", "topic", "script", "seconds", "visual_mode", "voice_id", "voice_speed",
     "caption_style", "caption_position", "caption_size", "caption_font", "caption_anim",
     "bg_theme", "bg_motion", "custom_c1", "custom_c2", "music_id", "music_volume", "watermark",
     "hook_enabled", "endcard_text", "views", "downloads", "scheduled_at",
@@ -144,6 +145,7 @@ def build_reel_doc(s: ReelSettings, input_mode: str, topic, script, title: str) 
         "topic": topic,
         "script": script,
         "seconds": s.seconds,
+        "visual_mode": s.visual_mode if s.visual_mode in ("gradient", "ai") else "gradient",
         "voice_id": s.voice_id,
         "voice_speed": s.voice_speed,
         "caption_style": s.caption_style,
@@ -227,17 +229,30 @@ async def run_pipeline(reel_id: str):
         )
 
         # Stage 4: render
-        await update_reel(reel_id, status="rendering", progress=72, stage_label="Rendering video",
-                          duration=round(duration, 2))
         out_path = str(MEDIA_DIR / f"{reel_id}.mp4")
         thumb_path = str(MEDIA_DIR / f"{reel_id}.jpg")
-        await pipeline.render_video(
-            audio_path, "subs.ass", reel["bg_theme"], duration, workdir, out_path,
-            music_id=reel.get("music_id", "none"),
-            music_volume=reel.get("music_volume", 0.13),
-            bg_motion=reel.get("bg_motion", "subtle"),
-            custom_colors=[reel.get("custom_c1"), reel.get("custom_c2")],
-        )
+        if reel.get("visual_mode") == "ai":
+            await update_reel(reel_id, status="rendering", progress=66,
+                              stage_label="Painting visuals", duration=round(duration, 2))
+            n = pipeline.scene_count(reel.get("seconds", 30))
+            prompts = await pipeline.generate_scene_prompts(script, n)
+            images = await pipeline.generate_images(prompts, workdir)
+            await update_reel(reel_id, status="rendering", progress=82, stage_label="Rendering video")
+            await pipeline.render_video_images(
+                audio_path, "subs.ass", images, duration, workdir, out_path,
+                music_id=reel.get("music_id", "none"),
+                music_volume=reel.get("music_volume", 0.13),
+            )
+        else:
+            await update_reel(reel_id, status="rendering", progress=72,
+                              stage_label="Rendering video", duration=round(duration, 2))
+            await pipeline.render_video(
+                audio_path, "subs.ass", reel["bg_theme"], duration, workdir, out_path,
+                music_id=reel.get("music_id", "none"),
+                music_volume=reel.get("music_volume", 0.13),
+                bg_motion=reel.get("bg_motion", "subtle"),
+                custom_colors=[reel.get("custom_c1"), reel.get("custom_c2")],
+            )
         await pipeline.extract_thumbnail(out_path, thumb_path)
 
         # Stage 5: upload to durable object storage

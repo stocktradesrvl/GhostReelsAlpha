@@ -138,6 +138,7 @@ export default function ReelDetail() {
         topic: reel.topic || undefined,
         script: reel.script || undefined,
         seconds: reel.seconds,
+        visual_mode: reel.visual_mode,
         voice_id: reel.voice_id,
         voice_speed: reel.voice_speed,
         caption_style: reel.caption_style,
@@ -307,7 +308,11 @@ export default function ReelDetail() {
             <Ionicons name="alert" size={30} color={colors.error} />
           </View>
           <Text style={styles.stateTitle}>Generation failed</Text>
-          <Text style={styles.stateSub}>{reel?.error || "Something went wrong while rendering."}</Text>
+          <Text style={styles.stateSub}>
+            {reel?.error && /budget/i.test(reel.error)
+              ? "Your AI credits ran out. Top up your Universal Key (Profile → Manage plan → Universal Key → Add Balance), then tap Try again."
+              : (reel?.error || "Something went wrong while rendering.")}
+          </Text>
           <PrimaryButton testID="retry-button" label="Try again" icon="refresh" onPress={retry} style={{ marginTop: spacing.lg, alignSelf: "stretch" }} />
           <PrimaryButton variant="ghost" label="Back" onPress={() => router.back()} style={{ marginTop: spacing.sm, alignSelf: "stretch" }} />
         </View>

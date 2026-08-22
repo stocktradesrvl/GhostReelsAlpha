@@ -34,6 +34,7 @@ export type Reel = {
   topic: string | null;
   script: string | null;
   seconds: number;
+  visual_mode: string;
   voice_id: string;
   voice_speed: string;
   caption_style: string;
