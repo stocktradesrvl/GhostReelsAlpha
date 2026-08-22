@@ -137,6 +137,17 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
 - P2: multi-aspect export (Reels/Shorts variants); onboarding; brand kit (logo watermark).
 - P2: retry queue durability across server restarts; per-user library (auth).
 
+## App Store readiness fixes (2026-06 · forked) — DONE
+- **Account deletion (Apple 5.1.1(v) blocker):** `DELETE /api/auth/me` purges the user + their reels
+  (and local media), outros, series, and AES-encrypted BYOK keys. Settings → **Delete account** (danger
+  button + confirm modal) calls it then signs out. Verified end-to-end: throwaway account removed from Mongo.
+- **Privacy policy + support (blocker):** public `GET /api/legal/privacy` serves a dark-themed HTML policy
+  (accounts, prompts/reels, encrypted BYOK, RevenueCat/no card storage, no data sale, no model training,
+  in-app deletion, not for under-13, contact russngina@gmail.com). Settings "LEGAL & SUPPORT" links to it
+  (in-app browser) + **Contact Support** mailto:russngina@gmail.com.
+- **Export compliance:** `ios.config.usesNonExemptEncryption=false` in `app.json`.
+- Support email constant: `SUPPORT_EMAIL` in `src/api.ts` (change if the owner uses a different address).
+
 ## Next tasks
 - **Optional hardening (flagged by tester):** scope `GET /reels/{id}`, `/video`, `/thumb`, `/view`,
   `/download`, `DELETE /reels/{id}`, and the scene/line regenerate endpoints by `user_id` (currently

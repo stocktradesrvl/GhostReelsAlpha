@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from datetime import timedelta
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
@@ -54,6 +54,73 @@ load_dotenv(ROOT_DIR / ".env")
 
 MEDIA_DIR = ROOT_DIR / "media"
 MEDIA_DIR.mkdir(exist_ok=True)
+
+PRIVACY_POLICY_HTML = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>GhostReel — Privacy Policy</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; background:#0A0A0A; color:#E7E5E4; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; line-height:1.6; }
+  .wrap { max-width:720px; margin:0 auto; padding:32px 20px 64px; }
+  h1 { font-size:26px; margin:0 0 4px; }
+  h2 { font-size:18px; margin:28px 0 8px; color:#F87171; }
+  p, li { font-size:15px; color:#D6D3D1; }
+  a { color:#F87171; }
+  .muted { color:#A8A29E; font-size:13px; }
+  ul { padding-left:20px; }
+  hr { border:none; border-top:1px solid #292524; margin:28px 0; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Privacy Policy</h1>
+    <p class="muted">GhostReel — Faceless AI Reels. Last updated: June 2026.</p>
+    <p>This policy explains what GhostReel ("we", "the app") collects, how we use it, and the choices you have. We keep data collection to the minimum needed to run the app.</p>
+
+    <h2>Information we collect</h2>
+    <ul>
+      <li><strong>Account:</strong> your email address and a securely hashed password. We never store your password in plain text.</li>
+      <li><strong>Your content:</strong> the prompts/topics you enter and the reels (video, audio, captions, images) generated from them, so you can view, edit, and manage them.</li>
+      <li><strong>Optional API keys (BYOK):</strong> if you choose to add your own OpenAI or Google API key, it is encrypted at rest using AES-256 and is never shown back to you in full or shared. You can remove it at any time.</li>
+      <li><strong>Subscription status:</strong> whether you have an active subscription, provided through RevenueCat and the Apple App Store / Google Play. We do <strong>not</strong> collect or store your card or payment details — those are handled entirely by Apple/Google.</li>
+    </ul>
+
+    <h2>How we use your information</h2>
+    <ul>
+      <li>To create an account and let you sign in.</li>
+      <li>To generate, store, and let you manage your reels.</li>
+      <li>To provide AI features. When you generate content, your prompt/text is sent to the AI provider (OpenAI and/or Google) solely to produce your result.</li>
+      <li>To determine whether your subscription unlocks unlimited generation.</li>
+    </ul>
+
+    <h2>What we do NOT do</h2>
+    <ul>
+      <li>We do <strong>not</strong> sell your personal data.</li>
+      <li>We do <strong>not</strong> use your prompts or content to train AI models.</li>
+      <li>We do <strong>not</strong> store your payment card details.</li>
+    </ul>
+
+    <h2>Data retention &amp; deletion</h2>
+    <p>You can delete your account and all associated data at any time from <strong>Settings → Delete account</strong> in the app. This permanently removes your account, your reels, and your encrypted API keys from our systems.</p>
+
+    <h2>Children</h2>
+    <p>GhostReel is not directed at children under 13, and we do not knowingly collect personal information from children under 13.</p>
+
+    <h2>Third-party services</h2>
+    <p>We rely on service providers to operate the app, including OpenAI and Google (AI generation), RevenueCat and Apple/Google (subscriptions and payments), and our cloud hosting/storage. Your use of AI features is also subject to those providers' terms.</p>
+
+    <h2>Contact</h2>
+    <p>Questions or requests about your privacy? Email <a href="mailto:russngina@gmail.com">russngina@gmail.com</a>.</p>
+
+    <hr/>
+    <p class="muted">By using GhostReel you agree to this Privacy Policy.</p>
+  </div>
+</body>
+</html>"""
+
 
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
@@ -1172,6 +1239,35 @@ async def sync_subscription(body: SubscriptionSync, user=Depends(current_user)):
     logger.info("subscription/sync user=%s -> is_subscribed=%s", user["id"], bool(body.is_subscribed))
     fresh = await db.users.find_one({"id": user["id"]})
     return public_user(fresh)
+
+
+@api_router.delete("/auth/me")
+async def delete_account(user=Depends(current_user)):
+    """Permanently delete the signed-in user and ALL of their data (Apple 5.1.1(v)).
+
+    Removes reels (+ local media files), outros, series, and the user record —
+    including the AES-encrypted BYOK keys stored on the user document."""
+    uid = user["id"]
+    # Reels + their locally-cached media files.
+    reel_ids = [r["id"] async for r in db.reels.find({"user_id": uid}, {"id": 1})]
+    for rid in reel_ids:
+        for p in (MEDIA_DIR / f"{rid}.mp4", MEDIA_DIR / f"{rid}.jpg"):
+            p.unlink(missing_ok=True)
+    outro_ids = [o["id"] async for o in db.outros.find({"user_id": uid}, {"id": 1})]
+    for oid in outro_ids:
+        (MEDIA_DIR / f"{oid}.mp4").unlink(missing_ok=True)
+    await db.reels.delete_many({"user_id": uid})
+    await db.outros.delete_many({"user_id": uid})
+    await db.series.delete_many({"user_id": uid})
+    await db.users.delete_one({"id": uid})
+    logger.info("account deleted user=%s reels=%d outros=%d", uid, len(reel_ids), len(outro_ids))
+    return {"ok": True}
+
+
+@api_router.get("/legal/privacy", response_class=HTMLResponse)
+async def privacy_policy():
+    """Public privacy policy page linked from the app (Apple 5.1.1 / Play User Data)."""
+    return HTMLResponse(content=PRIVACY_POLICY_HTML)
 
 
 @api_router.get("/settings")

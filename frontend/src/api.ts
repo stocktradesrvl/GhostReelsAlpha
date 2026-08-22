@@ -1,5 +1,8 @@
 const BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api`;
 
+export const PRIVACY_POLICY_URL = `${BASE}/legal/privacy`;
+export const SUPPORT_EMAIL = "russngina@gmail.com";
+
 export type Voice = { id: string; name: string; tagline: string };
 export type VoiceSpeed = { id: string; name: string };
 export type ImageStyle = { id: string; name: string };
@@ -131,6 +134,7 @@ export const api = {
   login: (email: string, password: string) =>
     req<{ access_token: string; user: UserProfile }>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   me: () => req<UserProfile>("/auth/me"),
+  deleteAccount: () => req<{ ok: boolean }>("/auth/me", { method: "DELETE" }),
   syncSubscription: (is_subscribed: boolean) =>
     req<UserProfile>("/subscription/sync", { method: "POST", body: JSON.stringify({ is_subscribed }) }),
   getConfig: () => req<Config>("/config"),

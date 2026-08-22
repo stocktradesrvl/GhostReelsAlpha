@@ -1,12 +1,13 @@
 import { BottomSheetModal } from "@gorhom/bottom-sheet";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Linking, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { api, AppSettings, Config } from "@/src/api";
+import { api, AppSettings, Config, PRIVACY_POLICY_URL, SUPPORT_EMAIL } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import OptionSheet, { SheetOption } from "@/src/components/OptionSheet";
 import OutroSheet from "@/src/components/OutroSheet";
@@ -37,6 +38,35 @@ export default function SettingsScreen() {
   const [savingDefaults, setSavingDefaults] = useState(false);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [toast, setToast] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const openPrivacy = useCallback(async () => {
+    haptic.select();
+    try { await WebBrowser.openBrowserAsync(PRIVACY_POLICY_URL); }
+    catch { Linking.openURL(PRIVACY_POLICY_URL); }
+  }, []);
+
+  const openSupport = useCallback(() => {
+    haptic.select();
+    const subject = encodeURIComponent("GhostReel support");
+    Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${subject}`);
+  }, []);
+
+  const doDeleteAccount = useCallback(async () => {
+    setDeleting(true);
+    try {
+      await api.deleteAccount();
+      haptic.success();
+      setConfirmDelete(false);
+      await signOut();
+    } catch {
+      setDeleting(false);
+      haptic.error();
+      setToast("Couldn't delete your account. Please try again.");
+      setTimeout(() => setToast(null), 2500);
+    }
+  }, [signOut]);
 
   const voiceSheet = useRef<BottomSheetModal>(null);
   const musicSheet = useRef<BottomSheetModal>(null);
@@ -331,10 +361,54 @@ export default function SettingsScreen() {
           style={{ marginTop: spacing.md }}
         />
 
+        <Text style={styles.sectionLabel}>LEGAL & SUPPORT</Text>
+        <View style={styles.linkCard}>
+          <Pressable testID="privacy-link" onPress={openPrivacy} style={styles.linkRow}>
+            <View style={styles.settingLeft}>
+              <Ionicons name="shield-checkmark-outline" size={18} color={colors.onSurfaceSecondary} />
+              <Text style={styles.settingLabel}>Privacy Policy</Text>
+            </View>
+            <Ionicons name="open-outline" size={16} color={colors.onSurfaceSecondary} />
+          </Pressable>
+          <View style={styles.linkDivider} />
+          <Pressable testID="support-link" onPress={openSupport} style={styles.linkRow}>
+            <View style={styles.settingLeft}>
+              <Ionicons name="mail-outline" size={18} color={colors.onSurfaceSecondary} />
+              <Text style={styles.settingLabel}>Contact Support</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={colors.onSurfaceSecondary} />
+          </Pressable>
+        </View>
+
+        <Pressable testID="delete-account-button" onPress={() => { haptic.medium(); setConfirmDelete(true); }} style={styles.deleteRow}>
+          <Ionicons name="trash-outline" size={18} color={colors.error} />
+          <Text style={styles.deleteTxt}>Delete account</Text>
+        </Pressable>
+        <Text style={styles.deleteHint}>Permanently deletes your account, reels, and saved keys. This can't be undone.</Text>
+
         {!!toast && (
           <View style={styles.toast} testID="settings-toast"><Text style={styles.toastTxt}>{toast}</Text></View>
         )}
       </KeyboardAwareScrollView>
+
+      <Modal visible={confirmDelete} transparent animationType="fade" onRequestClose={() => !deleting && setConfirmDelete(false)}>
+        <Pressable style={styles.backdrop} onPress={() => !deleting && setConfirmDelete(false)}>
+          <Pressable style={styles.confirmCard} onPress={() => {}}>
+            <Text style={styles.confirmTitle}>Delete account?</Text>
+            <Text style={styles.confirmBody}>
+              This permanently deletes your account and all your reels, outros, series, and saved API keys. This action cannot be undone.
+            </Text>
+            <View style={styles.confirmRow}>
+              <Pressable testID="delete-cancel" disabled={deleting} onPress={() => setConfirmDelete(false)} style={[styles.confirmBtn, styles.confirmGhost]}>
+                <Text style={styles.confirmGhostTxt}>Cancel</Text>
+              </Pressable>
+              <Pressable testID="delete-confirm" disabled={deleting} onPress={doDeleteAccount} style={[styles.confirmBtn, styles.confirmDanger]}>
+                {deleting ? <ActivityIndicator color="#fff" /> : <Text style={styles.confirmDangerTxt}>Delete</Text>}
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <OptionSheet ref={voiceSheet} title="Default voice" options={voiceOptions} selectedId={defaults.voice_id || "onyx"} onSelect={(id) => { persistDefaults({ ...defaults, voice_id: id }); voiceSheet.current?.dismiss(); }} />
       <OptionSheet ref={musicSheet} title="Default music" options={musicOptions} selectedId={defaults.music_id || "none"} onSelect={(id) => { persistDefaults({ ...defaults, music_id: id }); musicSheet.current?.dismiss(); }} />
@@ -397,4 +471,21 @@ const styles = StyleSheet.create({
   version: { fontFamily: font.bodyMed, fontSize: 11, color: colors.onSurfaceSecondary, marginTop: spacing.sm },
   toast: { marginTop: spacing.lg, alignSelf: "center", paddingHorizontal: spacing.lg, height: 40, borderRadius: radius.pill, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
   toastTxt: { fontFamily: font.bodySemi, fontSize: 13, color: colors.onSurface },
+  sectionLabel: { fontFamily: font.bodyBold, fontSize: 11, letterSpacing: 1.2, color: colors.brand, marginTop: spacing.xl, marginBottom: spacing.sm },
+  linkCard: { borderRadius: radius.md, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, overflow: "hidden" },
+  linkRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.md, paddingVertical: spacing.md, minHeight: 48 },
+  linkDivider: { height: 1, backgroundColor: colors.border, marginLeft: spacing.md },
+  deleteRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, marginTop: spacing.xl, height: 48, borderRadius: radius.md, borderWidth: 1, borderColor: colors.error },
+  deleteTxt: { fontFamily: font.bodyBold, fontSize: 15, color: colors.error },
+  deleteHint: { fontFamily: font.body, fontSize: 12, color: colors.onSurfaceSecondary, textAlign: "center", marginTop: spacing.sm, lineHeight: 17 },
+  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center", padding: spacing.xl },
+  confirmCard: { width: "100%", maxWidth: 360, borderRadius: radius.lg, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, padding: spacing.lg },
+  confirmTitle: { fontFamily: font.display, fontSize: 20, color: colors.onSurface },
+  confirmBody: { fontFamily: font.body, fontSize: 14, color: colors.onSurfaceSecondary, marginTop: spacing.sm, lineHeight: 20 },
+  confirmRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg },
+  confirmBtn: { flex: 1, height: 48, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
+  confirmGhost: { backgroundColor: colors.surfaceTertiary },
+  confirmGhostTxt: { fontFamily: font.bodySemi, fontSize: 15, color: colors.onSurface },
+  confirmDanger: { backgroundColor: colors.error },
+  confirmDangerTxt: { fontFamily: font.bodyBold, fontSize: 15, color: "#fff" },
 });
