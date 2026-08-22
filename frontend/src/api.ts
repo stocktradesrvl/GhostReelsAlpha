@@ -93,10 +93,24 @@ export type Series = {
   updated_at: string;
 };
 
+let authToken: string | null = null;
+export function setAuthToken(t: string | null) { authToken = t; }
+
+export type UserProfile = {
+  id: string; email: string;
+  free_used: number; free_limit: number; is_subscribed: boolean;
+  has_own_key: boolean; openai_key_set: boolean; google_key_set: boolean;
+  openai_key_masked: string; google_key_masked: string; brand_handle: string;
+};
+
 async function req<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...options,
-    headers: { "Content-Type": "application/json", ...(options?.headers || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...(options?.headers || {}),
+    },
   });
   if (!res.ok) {
     let msg = `Request failed (${res.status})`;
@@ -104,12 +118,19 @@ async function req<T>(path: string, options?: RequestInit): Promise<T> {
       const body = await res.json();
       msg = body.detail || msg;
     } catch {}
-    throw new Error(msg);
+    const err: any = new Error(msg);
+    err.status = res.status;
+    throw err;
   }
   return res.json() as Promise<T>;
 }
 
 export const api = {
+  register: (email: string, password: string) =>
+    req<{ access_token: string; user: UserProfile }>("/auth/register", { method: "POST", body: JSON.stringify({ email, password }) }),
+  login: (email: string, password: string) =>
+    req<{ access_token: string; user: UserProfile }>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+  me: () => req<UserProfile>("/auth/me"),
   getConfig: () => req<Config>("/config"),
   generateScript: (topic: string, seconds: number) =>
     req<{ script: string; word_count: number }>("/script", {
@@ -156,6 +177,10 @@ export const api = {
   getSettings: () => req<AppSettings>("/settings"),
   updateSettings: (payload: { openai_key?: string; google_key?: string; brand_handle?: string }) =>
     req<AppSettings>("/settings", { method: "PUT", body: JSON.stringify(payload) }),
+  testKeys: (payload: { openai_key?: string; google_key?: string }) =>
+    req<{ openai?: { ok: boolean; message: string }; google?: { ok: boolean; message: string } }>(
+      "/settings/test", { method: "POST", body: JSON.stringify(payload) },
+    ),
   getLines: (id: string) =>
     req<{ editable: boolean; status: string; lines: { index: number; text: string }[] }>(
       `/reels/${id}/lines`,
@@ -172,7 +197,11 @@ export const api = {
     const form = new FormData();
     form.append("file", { uri, name: name || "outro.mp4", type: "video/mp4" } as any);
     form.append("name", name || "Outro clip");
-    const res = await fetch(`${BASE}/outros`, { method: "POST", body: form });
+    const res = await fetch(`${BASE}/outros`, {
+      method: "POST",
+      headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+      body: form,
+    });
     if (!res.ok) {
       let msg = "Upload failed";
       try { msg = (await res.json()).detail || msg; } catch {}

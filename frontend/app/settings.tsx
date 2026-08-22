@@ -7,6 +7,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api, AppSettings, Config } from "@/src/api";
+import { useAuth } from "@/src/auth";
 import OptionSheet, { SheetOption } from "@/src/components/OptionSheet";
 import OutroSheet from "@/src/components/OutroSheet";
 import PrimaryButton from "@/src/components/PrimaryButton";
@@ -20,12 +21,15 @@ const DURATIONS = [15, 30, 60];
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { user, signOut, refresh: refreshAuth } = useAuth();
 
   const [config, setConfig] = useState<Config | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [openaiKey, setOpenaiKey] = useState("");
   const [googleKey, setGoogleKey] = useState("");
   const [savingKeys, setSavingKeys] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ openai?: { ok: boolean; message: string }; google?: { ok: boolean; message: string } }>({});
 
   const [defaults, setDefaults] = useState<StudioDefaults>({});
   const [brandHandle, setBrandHandle] = useState("");
@@ -47,6 +51,25 @@ export default function SettingsScreen() {
 
   const flash = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(null), 2200); }, []);
 
+  const testKeys = useCallback(async () => {
+    setTesting(true);
+    setTestResult({});
+    try {
+      const payload: any = {};
+      if (openaiKey.trim()) payload.openai_key = openaiKey.trim();
+      if (googleKey.trim()) payload.google_key = googleKey.trim();
+      const res = await api.testKeys(payload);
+      setTestResult(res);
+      const vals = Object.values(res);
+      (vals.length && vals.every((r: any) => r.ok) ? haptic.success : haptic.error)();
+    } catch (e: any) {
+      haptic.error();
+      flash(e.message || "Couldn't test keys");
+    } finally {
+      setTesting(false);
+    }
+  }, [openaiKey, googleKey, flash]);
+
   const voice = config?.voices.find((v) => v.id === (defaults.voice_id || "onyx"));
   const music = config?.music_tracks.find((m) => m.id === (defaults.music_id || "none"));
   const voiceOptions: SheetOption[] = config?.voices.map((v) => ({ id: v.id, title: v.name, subtitle: v.tagline })) || [];
@@ -60,6 +83,7 @@ export default function SettingsScreen() {
       if (googleKey.trim()) payload.google_key = googleKey.trim();
       const s = await api.updateSettings(payload);
       setSettings(s);
+      await refreshAuth();
       setOpenaiKey(""); setGoogleKey("");
       haptic.success();
       flash("Keys saved ✓");
@@ -69,7 +93,7 @@ export default function SettingsScreen() {
     } finally {
       setSavingKeys(false);
     }
-  }, [openaiKey, googleKey, flash]);
+  }, [openaiKey, googleKey, flash, refreshAuth]);
 
   const clearKey = useCallback((which: "openai" | "google") => {
     Alert.alert("Remove key?", `The app will use built-in credits for ${which === "openai" ? "text & voice" : "AI images"}.`, [
@@ -78,11 +102,11 @@ export default function SettingsScreen() {
         text: "Remove", style: "destructive", onPress: async () => {
           const payload = which === "openai" ? { openai_key: "" } : { google_key: "" };
           const s = await api.updateSettings(payload);
-          setSettings(s); haptic.medium(); flash("Key removed");
+          setSettings(s); await refreshAuth(); haptic.medium(); flash("Key removed");
         },
       },
     ]);
-  }, [flash]);
+  }, [flash, refreshAuth]);
 
   const persistDefaults = useCallback(async (next: StudioDefaults) => {
     setDefaults(next);
@@ -170,6 +194,13 @@ export default function SettingsScreen() {
             </Pressable>
           )}
         </View>
+
+        {!!testResult.openai && (
+          <View style={styles.resultRow}>
+            <Ionicons name={testResult.openai.ok ? "checkmark-circle" : "close-circle"} size={14} color={testResult.openai.ok ? colors.success : colors.error} />
+            <Text style={[styles.resTxt, { color: testResult.openai.ok ? colors.success : colors.error }]}>{testResult.openai.message}</Text>
+          </View>
+        )}
 
         <View style={[styles.keyRow, { marginTop: spacing.lg }]}>
           <Text style={styles.keyLabel}>Google / Gemini key</Text>
@@ -265,15 +296,31 @@ export default function SettingsScreen() {
         ))}
 
         {/* ---- ABOUT ---- */}
-        <Section label="AI CREDITS & ABOUT" />
+        <Section label="PLAN & CREDITS" />
         <View style={styles.aboutCard}>
+          {user && (
+            <Text style={styles.planLine}>
+              {user.is_subscribed
+                ? "✓ Subscribed — unlimited reels"
+                : user.has_own_key
+                ? "✓ Using your own API key — unlimited reels"
+                : `Free plan · ${Math.max(0, user.free_limit - user.free_used)} of ${user.free_limit} free reels left`}
+            </Text>
+          )}
           <Text style={styles.aboutText}>
             Faceless AI Reels turns any topic into a TikTok-ready vertical video.{"\n\n"}
-            Running low on built-in credits? Either paste your own API keys above, or top up the shared Universal Key:
-            Profile → Manage plan → Universal Key → Add Balance.
+            Out of free reels? Paste your own OpenAI/Google key above to generate freely, or subscribe (coming soon).
           </Text>
-          <Text style={styles.version}>v1.0</Text>
+          {!!user && <Text style={styles.version}>Signed in as {user.email} · v1.0</Text>}
         </View>
+        <PrimaryButton
+          testID="signout-button"
+          variant="ghost"
+          icon="log-out-outline"
+          label="Sign out"
+          onPress={async () => { haptic.medium(); await signOut(); }}
+          style={{ marginTop: spacing.md }}
+        />
 
         {!!toast && (
           <View style={styles.toast} testID="settings-toast"><Text style={styles.toastTxt}>{toast}</Text></View>
@@ -337,6 +384,7 @@ const styles = StyleSheet.create({
   presetName: { flex: 1, fontFamily: font.bodyBold, fontSize: 14, color: colors.onSurface },
   aboutCard: { padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, marginTop: spacing.sm },
   aboutText: { fontFamily: font.body, fontSize: 13, color: colors.onSurfaceSecondary, lineHeight: 19 },
+  planLine: { fontFamily: font.bodyBold, fontSize: 14, color: colors.onSurface, marginBottom: spacing.sm },
   version: { fontFamily: font.bodyMed, fontSize: 11, color: colors.onSurfaceSecondary, marginTop: spacing.sm },
   toast: { marginTop: spacing.lg, alignSelf: "center", paddingHorizontal: spacing.lg, height: 40, borderRadius: radius.pill, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
   toastTxt: { fontFamily: font.bodySemi, fontSize: 13, color: colors.onSurface },

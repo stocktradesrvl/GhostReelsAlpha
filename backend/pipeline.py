@@ -46,6 +46,20 @@ def set_user_keys(openai_key: str = "", google_key: str = "") -> None:
     USER_KEYS["google"] = (google_key or "").strip()
 
 
+async def validate_openai_key(key: str) -> bool:
+    """Lightweight validation — lists models (no token cost). Raises on invalid key."""
+    client = openai.AsyncOpenAI(api_key=key)
+    await client.models.list()
+    return True
+
+
+def validate_google_key(key: str) -> bool:
+    """Lightweight validation for a Google/Gemini key. Raises on invalid key."""
+    client = google_genai.Client(api_key=key)
+    next(iter(client.models.list()))
+    return True
+
+
 async def _chat_text(session_id: str, system: str, prompt: str) -> str:
     """Text generation via the user's own OpenAI key when set, else the Emergent key."""
     if USER_KEYS["openai"]:

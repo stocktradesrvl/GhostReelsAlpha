@@ -8,6 +8,7 @@ import { KeyboardAwareScrollView, KeyboardStickyView } from "react-native-keyboa
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api, Config, Outro } from "@/src/api";
+import { useAuth } from "@/src/auth";
 import { playPreview, stopPreview } from "@/src/audioPreview";
 import OptionSheet, { SheetOption } from "@/src/components/OptionSheet";
 import OutroSheet from "@/src/components/OutroSheet";
@@ -32,6 +33,8 @@ export default function CreateScreen() {
   const [visualMode, setVisualMode] = useState<"gradient" | "ai">("gradient");
   const [imageStyle, setImageStyle] = useState("cinematic");
   const [creditWarn, setCreditWarn] = useState(false);
+  const [quotaHit, setQuotaHit] = useState(false);
+  const { refresh: refreshAuth } = useAuth();
   const [topic, setTopic] = useState("");
   const [script, setScript] = useState("");
   const [seconds, setSeconds] = useState(30);
@@ -203,7 +206,8 @@ export default function CreateScreen() {
       setScript(res.script);
       haptic.success();
     } catch (e: any) {
-      setError(e.message || "Script generation failed.");
+      if (e?.status === 402) { setQuotaHit(true); setError(e.message || "Free reels used up. Add your own key in Settings."); }
+      else setError(e.message || "Script generation failed.");
       haptic.error();
     } finally {
       setWriting(false);
@@ -244,9 +248,15 @@ export default function CreateScreen() {
         outro_id: outro?.id || undefined,
       } as any);
       haptic.heavy();
+      refreshAuth();
       router.push(`/reel/${reel.id}`);
     } catch (e: any) {
-      setError(e.message || "Couldn't start generation.");
+      if (e?.status === 402) {
+        setError(e.message || "You've used your free reels. Add your own key or subscribe in Settings.");
+        setQuotaHit(true);
+      } else {
+        setError(e.message || "Couldn't start generation.");
+      }
       haptic.error();
     } finally {
       setSubmitting(false);
@@ -291,6 +301,13 @@ export default function CreateScreen() {
           <Pressable testID="credit-banner" onPress={() => setCreditWarn(false)} style={styles.creditBanner}>
             <Ionicons name="warning" size={16} color={colors.warning} />
             <Text style={styles.creditText}>Your AI credits ran out — top up your Universal Key to generate. Tap to dismiss.</Text>
+          </Pressable>
+        )}
+
+        {quotaHit && (
+          <Pressable testID="quota-banner" onPress={() => router.push("/settings")} style={styles.creditBanner}>
+            <Ionicons name="lock-closed" size={16} color={colors.warning} />
+            <Text style={styles.creditText}>You've used your free reels. Tap to add your own key or subscribe in Settings.</Text>
           </Pressable>
         )}
 

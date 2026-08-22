@@ -1,0 +1,57 @@
+{
+  "summary": "Iteration 10 (Auth + Quota + BYOK, FULL STACK) — 10/10 backend pytest cases PASS and full UI flow verified against EXPO_PUBLIC_BACKEND_URL with REELS_MOCK=1. Backend: /auth/register + /auth/login + /auth/me + wrong-password 401 + duplicate 409 + short-password 400 + unauthenticated endpoints (reels/series/settings/auth-me) all return 401 without Bearer token. Server-side lifetime free-reel quota is correctly enforced: three POST /api/reels succeed for a fresh account (free_used goes 0→3), the 4th returns HTTP 402 with 'used your 3 free reels' message; /api/script is gated too; the 4th reel is NOT persisted (list still returns 3). BYOK bypass verified end-to-end: PUT /api/settings {openai_key} flips has_own_key=true and the very next POST /api/reels succeeds; clearing the key with '' re-blocks generation. Encryption at rest confirmed by direct Mongo inspection — users collection stores openai_key_enc as opaque base64 AES-GCM blob (no 'sk-' substring, no plaintext openai_key field). GET /settings returns openai_key_masked='sk-••••XXXX' and never leaks the raw key. /api/settings/test called with a fake sk-... returns {openai:{ok:false}} (real provider validation). Per-user isolation: account A's reels and series are invisible to account B (/reels + /series scoped by user_id; /series/{id} returns 404 for non-owner). Frontend UI on 390×844 mobile viewport: fresh load shows /auth (email-input testID); tab-register + auth-submit registers and lands on Create; header settings-button navigates to /settings; signout-button returns to /auth; wrong password renders the auth-error box; relogin succeeds; PLAN LINE reads 'Free plan · 3 of 3 free reels left' on a fresh account; after burning quota via backend the UI Generate button returns 402 → quota-banner (testID quota-banner) shows text 'You've used your free reels. Tap to add your own key or subscribe in Settings.' and tapping it navigates to /settings; the PLAN LINE then reads 'Free plan · 0 of 3 free reels left'. Saving a BYOK OpenAI key via openai-key-input + save-keys-button flips the OpenAI status pill to 'Yours · sk-••••KLMN' and no raw key text ever appears in the DOM. Cross-account isolation verified in the UI: account B's Library does not contain account A's reels. ⚠ ONE BUG FOUND — the 'PLAN & CREDITS' plan-line does NOT update to 'Using your own API key — unlimited' after saving a BYOK key (see bug #1 below).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "settings.tsx Plan & Credits line",
+        "issue": "After saving a BYOK OpenAI/Google key via save-keys-button, the OpenAI pill correctly flips to 'Yours · sk-••••XXXX' AND settings.openai_key_set becomes true, BUT the PLAN & CREDITS line still shows 'Free plan · N of 3 free reels left' instead of the expected '✓ Using your own API key — unlimited reels'. Root cause: saveKeys() at /app/frontend/app/settings.tsx:78-95 mutates the local `settings` state via setSettings(s) but never calls `refreshAuth()` from useAuth(), so `user.has_own_key` stays stale (the plan line is rendered from `user.has_own_key`, not from `settings`). Fix: call `refreshAuth()` (or equivalent) right after `setSettings(s)` — same pattern used in index.tsx:251 after createReel succeeds. Same fix needed in `clearKey` (settings.tsx:97-108) so removing a key toggles the plan line back to 'Free plan · N left'.",
+        "testID": "openai-key-input / save-keys-button",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Create (index.tsx) — generate-reel-button hit-area vs HidingTabBar",
+        "issues": [
+          "The primary 'Generate Reel' button (testID generate-reel-button) at the bottom of the KeyboardAwareScrollView sits at y≈782-836 on a 390×844 viewport, i.e. UNDER the fixed HidingTabBar (~y=780-844). Playwright coordinate clicks landed on the Series tab underneath and navigated to /series instead of firing onPress. Auto-hide on scroll mitigates this in practice on real touch devices, but consider raising the button's z-index or lifting it above the tab bar (or padding contentContainerStyle.paddingBottom to > tabBarHeight + insets.bottom + button height) so it's always clickable when the tab bar is visible. NOT a blocker — verified onPress via el.click() dispatch works and returns 402 correctly."
+        ]
+      }
+    ],
+    "react_native_issues": [
+      {"component": "props.pointerEvents", "issue": "Pre-existing React 19 warning `props.pointerEvents is deprecated. Use style.pointerEvents`. Not new in this iteration."},
+      {"component": "expo-notifications (web)", "issue": "Pre-existing warning `[expo-notifications] Listening to push token changes is not yet fully supported on web` — web-preview limitation only."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_auth_quota_byok.py",
+    "/app/test_reports/pytest/pytest_iteration_10.xml"
+  ],
+  "action_items": [
+    "FIX (HIGH): In /app/frontend/app/settings.tsx `saveKeys` (line 78-95) and `clearKey` (line 97-108), call `refreshAuth()` (or refresh user via api.getMe() then update auth context) after setSettings(s) so the PLAN & CREDITS line reflects the new has_own_key state. Currently the pill updates but the plan line stays stale until the app is remounted or refreshAuth fires elsewhere.",
+    "OPTIONAL POLISH: Lift generate-reel-button z-index above HidingTabBar or add extra bottom padding to the scrollview so the button is never obscured by the fixed tab bar when the bar is visible (currently only auto-hide-on-scroll rescues this)."
+  ],
+  "critical_code_review_comments": [
+    "server.py:148-163 — enforce_quota() and consume_quota() are correctly wired: enforce runs BEFORE insert, consume runs AFTER insert, and both look at BYOK/subscribed to short-circuit. free_used only increments when the request actually goes to the shared pool. Ordering is right.",
+    "server.py:91-99 — enc_key/dec_key use AES-GCM with per-user+provider AAD ('{uid}:{provider}'). This means a leaked ciphertext from user A cannot be forged/replayed against user B. Good.",
+    "server.py:1124-1127 — _mask_key returns 'sk-3+••••+last4'. Simple, no ambiguity, and public_user only ever returns this masked form. Verified via DB inspection that plaintext keys are never persisted.",
+    "server.py:844-855 — /reels lists ONLY the caller's reels (find({'user_id': user['id']})). Per-user isolation is enforced at the query layer, not filtered post-hoc.",
+    "server.py:850-855 — Note: GET /api/reels/{id}, /video, /thumb, /view, /download and DELETE /reels/{id} are NOT scoped by user_id (they don't require auth). Any authenticated (or unauthenticated!) caller who knows the reel UUID can read metadata, watch the video, or DELETE the reel. Recommend adding user_id check on these routes if IDs are guessable / leak in URLs. Not part of this iteration's scope but worth flagging.",
+    "settings.tsx:78-108 — saveKeys and clearKey update local `settings` state but never touch the auth context. Consequence: pill (reads settings) updates, plan-line (reads user) doesn't. See bug #1.",
+    "auth.tsx:11-98 — Clean two-tab segment with proper testIDs (tab-login, tab-register, email-input, password-input, auth-submit, auth-error). KeyboardAvoidingView is used correctly.",
+    "api.ts / auth.tsx (SecureStore) — token is persisted under 'auth_token' and re-attached on reload, so refreshing the page keeps the session (verified: page.goto('/') after login still authenticated)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_auth_quota_byok.py (new — 10 tests, all pass)"
+  ],
+  "success_rate": {
+    "backend": "100% (10/10 pytest cases: TestAuth×5, TestQuota×2, TestBYOK×2, TestIsolation×1)",
+    "frontend": "~90% (6/7 UI flows PASS: auth screen, register/login/wrong-pw/relogin/signout, gear→settings, quota-banner on 4th attempt + banner tap → /settings, plan-line '0 of 3 free reels left', BYOK save flips pill to 'Yours · sk-••••' with no raw-key DOM leak, cross-account library isolation. 1/7 FAIL: PLAN & CREDITS line does not update to 'Using your own API key — unlimited' after BYOK save — bug #1)"
+  },
+  "seed_data_creation": "3 disposable QA accounts registered (qa+<uuid>@test.com / password123). Each had 3 free reels burned to exercise quota. No production data touched.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend auth+quota+BYOK+isolation is rock solid — reuse /app/backend/tests/test_auth_quota_byok.py as regression. Confirmed testIDs on /auth: email-input, password-input, tab-login, tab-register, auth-submit, auth-error. On /settings: settings-back, openai-key-input, google-key-input, save-keys-button, clear-openai, clear-google, brand-handle-input, save-brand-button, signout-button. On Create: topic-input, generate-reel-button (⚠ hit-area under HidingTabBar — use `el.click()` via page.evaluate instead of page.mouse.click coords when the tab bar is visible, otherwise the click lands on the Series tab). On Create when free_used>=3: quota-banner appears at top of scroll view. Frontend api client attaches JWT from SecureStore automatically. To validate the fix for bug #1, register a fresh account, burn 3 reels via backend, log in via UI, hit Generate → banner should appear → tap banner → in /settings save a BYOK key → PLAN & CREDITS line MUST flip to '✓ Using your own API key — unlimited reels' immediately (no reload).",
+  "rca_of_issue": "Bug #1 (Plan line stale after BYOK save): settings.tsx `saveKeys` and `clearKey` mutate ONLY the local settings state (setSettings(s)) but the PLAN & CREDITS block at line 302-306 reads `user.is_subscribed`, `user.has_own_key`, and `user.free_used` — all from the useAuth() context. Backend's PUT /settings response already carries the fresh has_own_key/openai_key_set values, but they land in `settings` not `user`. Fix: after `setSettings(s)`, call the auth context's refresh function (see /app/frontend/src/auth.tsx — there is a persist() and getMe() flow already) OR expose a refreshAuth() and invoke it in saveKeys/clearKey. index.tsx already does refreshAuth() after createReel — same pattern applies here."
+}

@@ -138,5 +138,28 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
 - P2: retry queue durability across server restarts; per-user library (auth).
 
 ## Next tasks
-- Add optional background-music mixing.
-- Add a captions position/size preset picker.
+- **Phase D — RevenueCat subscriptions (planned next):** wire in-app subscriptions; on entitlement,
+  set `users.is_subscribed=true` (the quota gate already honours `is_subscribed` for unlimited generation).
+  Needs a native build to test. Skipped Stripe for now.
+- **Optional hardening (flagged by tester):** scope `GET /reels/{id}`, `/video`, `/thumb`, `/view`,
+  `/download`, `DELETE /reels/{id}`, and the scene/line regenerate endpoints by `user_id` (currently
+  those reads/actions are uuid-guarded but not auth-scoped).
+
+## Monetization foundation (2026-08 · batch 12 · forked) — Auth + Quota + per-user encrypted BYOK
+- **Auth**: email+password, bcrypt hashes, JWT (30-day) via `Authorization: Bearer`. `users` collection
+  (uuid id, email unique). Endpoints `POST /api/auth/register|login`, `GET /api/auth/me`. `current_user`
+  dependency. Frontend `src/auth.tsx` (AuthProvider, token in platform-safe `storage.secure*` — SecureStore
+  on native, AsyncStorage on web), gate in `app/_layout.tsx` (RootNavigator redirects to `/auth`), `app/auth.tsx`
+  login/register screen. `api.ts` injects the Bearer token + surfaces `err.status`.
+- **Quota**: lifetime `FREE_LIMIT=3` free reels per account on the shared Emergent pool, tracked server-side
+  (`users.free_used`). `enforce_quota`/`consume_quota` gate `POST /reels`, `/series/*/episode`, `/script`.
+  Users with a saved BYOK key OR `is_subscribed` are unlimited (not counted). Batch requires own key/subscription.
+  Frontend surfaces HTTP 402 as a quota banner (`testID quota-banner`) linking to Settings; Settings shows plan status.
+- **Per-user BYOK (encrypted)**: keys moved from a global doc to the user doc, **AES-256-GCM encrypted at rest**
+  (`openai_key_enc`,`google_key_enc`; AES key from env `AES_SECRET_B64`, JWT from `JWT_SECRET` — both appended to
+  backend/.env). `enc_key`/`dec_key` (AAD = `uid:provider`). `GET/PUT /api/settings` now auth-scoped and return
+  only masked values (`public_user`). `run_pipeline`/regen tasks call `apply_owner_keys()` to load the reel owner's
+  keys into `pipeline.set_user_keys()` before generation. `classify_error` maps auth/401/403 → `key`.
+- **Reels/Series/Outros scoped by `user_id`** (create sets it; list/get/delete filter by owner).
+- Verified: testing agent iteration 10 — backend 10/10 (auth, quota 3→402, BYOK bypass, encryption-at-rest,
+  masking, isolation), frontend 7/7 after fixing the Settings `refreshAuth()` staleness bug.

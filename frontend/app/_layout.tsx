@@ -1,4 +1,4 @@
-import { Stack } from "expo-router";
+import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useFonts } from "expo-font";
@@ -9,6 +9,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 
+import { AuthProvider, useAuth } from "@/src/auth";
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { colors } from "@/src/theme";
 
@@ -48,24 +49,44 @@ export default function RootLayout() {
         <KeyboardProvider>
           <BottomSheetModalProvider>
             <StatusBar style="light" />
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: colors.surface },
-              }}
-            >
-              <Stack.Screen name="(tabs)" />
-              <Stack.Screen name="reel/[id]" options={{ animation: "slide_from_right" }} />
-              <Stack.Screen name="batch" options={{ animation: "slide_from_right" }} />
-              <Stack.Screen name="series/new" options={{ animation: "slide_from_right" }} />
-              <Stack.Screen name="series/[id]" options={{ animation: "slide_from_right" }} />
-              <Stack.Screen name="scenes/[id]" options={{ animation: "slide_from_right" }} />
-              <Stack.Screen name="lines/[id]" options={{ animation: "slide_from_right" }} />
-              <Stack.Screen name="settings" options={{ animation: "slide_from_right" }} />
-            </Stack>
+            <AuthProvider>
+              <RootNavigator />
+            </AuthProvider>
           </BottomSheetModalProvider>
         </KeyboardProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
+  );
+}
+
+function RootNavigator() {
+  const { ready, user } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!ready) return;
+    const onAuthScreen = segments[0] === "auth";
+    if (!user && !onAuthScreen) router.replace("/auth");
+    else if (user && onAuthScreen) router.replace("/(tabs)");
+  }, [ready, user, segments, router]);
+
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: colors.surface },
+      }}
+    >
+      <Stack.Screen name="auth" />
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="reel/[id]" options={{ animation: "slide_from_right" }} />
+      <Stack.Screen name="batch" options={{ animation: "slide_from_right" }} />
+      <Stack.Screen name="series/new" options={{ animation: "slide_from_right" }} />
+      <Stack.Screen name="series/[id]" options={{ animation: "slide_from_right" }} />
+      <Stack.Screen name="scenes/[id]" options={{ animation: "slide_from_right" }} />
+      <Stack.Screen name="lines/[id]" options={{ animation: "slide_from_right" }} />
+      <Stack.Screen name="settings" options={{ animation: "slide_from_right" }} />
+    </Stack>
   );
 }

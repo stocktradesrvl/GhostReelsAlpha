@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import List, Optional
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, FastAPI, File, Form, HTTPException, UploadFile
+import base64
+
+import bcrypt
+import jwt
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from datetime import timedelta
+from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.responses import FileResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
@@ -51,6 +58,119 @@ MEDIA_DIR.mkdir(exist_ok=True)
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
+
+# ----------------------------------------------------------------------------
+# Auth (email+password JWT) + per-user encrypted BYOK + free-reel quota
+# ----------------------------------------------------------------------------
+JWT_SECRET = os.environ["JWT_SECRET"]
+JWT_ALG = "HS256"
+ACCESS_MIN = 60 * 24 * 30  # 30-day mobile sessions
+AES_KEY = base64.b64decode(os.environ["AES_SECRET_B64"])
+DUMMY_HASH = bcrypt.hashpw(b"dummy-password", bcrypt.gensalt()).decode()
+FREE_LIMIT = 3
+bearer = HTTPBearer(auto_error=False)
+
+
+def hash_pw(p: str) -> str:
+    return bcrypt.hashpw(p.encode()[:72], bcrypt.gensalt(12)).decode()
+
+
+def verify_pw(p: str, h) -> bool:
+    try:
+        return bcrypt.checkpw(p.encode()[:72], h.encode() if isinstance(h, str) else h)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def make_token(uid: str) -> str:
+    now = datetime.now(timezone.utc)
+    return jwt.encode({"sub": uid, "iat": now, "exp": now + timedelta(minutes=ACCESS_MIN)},
+                      JWT_SECRET, algorithm=JWT_ALG)
+
+
+def enc_key(txt: str, uid: str, provider: str) -> str:
+    nonce = os.urandom(12)
+    ct = AESGCM(AES_KEY).encrypt(nonce, txt.encode(), f"{uid}:{provider}".encode())
+    return base64.b64encode(nonce + ct).decode()
+
+
+def dec_key(blob: str, uid: str, provider: str) -> str:
+    packed = base64.b64decode(blob)
+    return AESGCM(AES_KEY).decrypt(packed[:12], packed[12:], f"{uid}:{provider}".encode()).decode()
+
+
+async def current_user(cred: HTTPAuthorizationCredentials = Depends(bearer)):
+    unauth = HTTPException(401, "Not authenticated")
+    if not cred or not cred.credentials:
+        raise unauth
+    try:
+        payload = jwt.decode(cred.credentials, JWT_SECRET, algorithms=[JWT_ALG])
+        uid = payload.get("sub")
+    except Exception:  # noqa: BLE001
+        raise unauth
+    user = await db.users.find_one({"id": uid})
+    if not user:
+        raise unauth
+    return user
+
+
+def user_keys(user: dict) -> tuple:
+    """Return decrypted (openai, google) keys for a user, or ('','')."""
+    oa = gk = ""
+    if user.get("openai_key_enc"):
+        try:
+            oa = dec_key(user["openai_key_enc"], user["id"], "openai")
+        except Exception:  # noqa: BLE001
+            oa = ""
+    if user.get("google_key_enc"):
+        try:
+            gk = dec_key(user["google_key_enc"], user["id"], "google")
+        except Exception:  # noqa: BLE001
+            gk = ""
+    return oa, gk
+
+
+def public_user(u: dict) -> dict:
+    oa, gk = user_keys(u)
+    return {
+        "id": u["id"], "email": u["email"],
+        "free_used": u.get("free_used", 0), "free_limit": FREE_LIMIT,
+        "is_subscribed": bool(u.get("is_subscribed")),
+        "has_own_key": bool(oa or gk),
+        "openai_key_set": bool(u.get("openai_key_enc")),
+        "google_key_set": bool(u.get("google_key_enc")),
+        "openai_key_masked": _mask_key(oa),
+        "google_key_masked": _mask_key(gk),
+        "brand_handle": u.get("brand_handle", ""),
+    }
+
+
+async def enforce_quota(user: dict):
+    oa, gk = user_keys(user)
+    if oa or gk or user.get("is_subscribed"):
+        return
+    if user.get("free_used", 0) < FREE_LIMIT:
+        return
+    raise HTTPException(402, (
+        f"You've used your {FREE_LIMIT} free reels. Add your own OpenAI or Google key "
+        f"in Settings, or subscribe, to keep generating."
+    ))
+
+
+async def consume_quota(user: dict):
+    oa, gk = user_keys(user)
+    if not (oa or gk) and not user.get("is_subscribed"):
+        await db.users.update_one({"id": user["id"]}, {"$inc": {"free_used": 1}})
+
+
+async def apply_owner_keys(reel: dict):
+    """Load the reel owner's BYOK keys into the pipeline for this generation."""
+    oa = gk = ""
+    if reel.get("user_id"):
+        owner = await db.users.find_one({"id": reel["user_id"]})
+        if owner:
+            oa, gk = user_keys(owner)
+    pipeline.set_user_keys(oa, gk)
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -166,6 +286,16 @@ class SettingsUpdate(BaseModel):
     brand_handle: Optional[str] = None
 
 
+class TestKeysRequest(BaseModel):
+    openai_key: Optional[str] = None
+    google_key: Optional[str] = None
+
+
+class AuthIn(BaseModel):
+    email: str
+    password: str
+
+
 PUBLIC_FIELDS = {
     "id", "title", "input_mode", "topic", "script", "series_id", "episode_number", "seconds", "visual_mode", "image_style", "voice_id", "voice_speed",
     "caption_style", "caption_position", "caption_size", "caption_font", "caption_anim",
@@ -207,10 +337,11 @@ def validate_settings(s: ReelSettings):
 
 
 def build_reel_doc(s: ReelSettings, input_mode: str, topic, script, title: str,
-                   series_id: str = None, episode_number: int = None) -> dict:
+                   series_id: str = None, episode_number: int = None, user_id: str = None) -> dict:
     reel_id = str(uuid.uuid4())
     return {
         "id": reel_id,
+        "user_id": user_id,
         "title": title,
         "input_mode": input_mode,
         "topic": topic,
@@ -281,6 +412,7 @@ async def run_pipeline(reel_id: str):
         reel = await db.reels.find_one({"id": reel_id})
         if not reel:
             return
+        await apply_owner_keys(reel)
 
         series = None
         if reel.get("series_id"):
@@ -493,6 +625,7 @@ async def regenerate_scene_task(reel_id: str, index: int, prompt: str = None):
         scenes = list(reel.get("scenes") or [])
         if index < 0 or index >= len(scenes):
             return
+        await apply_owner_keys(reel)
         await update_reel(reel_id, status="rendering", progress=40, stage_label="Repainting scene",
                           error=None, error_code=None)
         if prompt and prompt.strip():
@@ -531,6 +664,7 @@ async def regenerate_line_task(reel_id: str, index: int, text: str):
         segments = list(reel.get("segments") or [])
         if index < 0 or index >= len(segments):
             return
+        await apply_owner_keys(reel)
         await update_reel(reel_id, status="voicing", progress=25, stage_label="Re-recording line",
                           error=None, error_code=None)
         segments[index]["text"] = (text or "").strip()[:400] or segments[index]["text"]
@@ -600,14 +734,19 @@ async def get_config():
 
 
 @api_router.post("/script")
-async def make_script(req: ScriptRequest):
+async def make_script(req: ScriptRequest, user=Depends(current_user)):
     if not req.topic.strip():
         raise HTTPException(400, "Topic is required")
+    await enforce_quota(user)
+    oa, gk = user_keys(user)
+    pipeline.set_user_keys(oa, gk)
     try:
         script = await pipeline.generate_script(req.topic.strip(), req.seconds)
     except Exception as e:  # noqa: BLE001
         code, friendly = classify_error(e)
-        raise HTTPException(402 if code == "budget" else 500, friendly)
+        raise HTTPException(402 if code in ("budget", "key") else 500, friendly)
+    finally:
+        pipeline.set_user_keys("", "")
     return {"script": script, "word_count": len(script.split())}
 
 
@@ -623,8 +762,9 @@ async def voice_preview(voice_id: str):
 
 
 @api_router.post("/reels")
-async def create_reel(req: CreateReelRequest):
+async def create_reel(req: CreateReelRequest, user=Depends(current_user)):
     validate_settings(req)
+    await enforce_quota(user)
     script = (req.script or "").strip() or None
     topic = (req.topic or "").strip() or None
     if req.input_mode == "script" and not script:
@@ -633,8 +773,9 @@ async def create_reel(req: CreateReelRequest):
         raise HTTPException(400, "Topic is required")
 
     title = (req.title or "").strip() or ((script or topic or "Untitled")[:48].strip())
-    doc = build_reel_doc(req, req.input_mode, topic, script, title)
+    doc = build_reel_doc(req, req.input_mode, topic, script, title, user_id=user["id"])
     await db.reels.insert_one(doc)
+    await consume_quota(user)
 
     import asyncio
     asyncio.create_task(run_pipeline(doc["id"]))
@@ -642,8 +783,11 @@ async def create_reel(req: CreateReelRequest):
 
 
 @api_router.post("/reels/batch")
-async def create_reels_batch(req: BatchReelRequest):
+async def create_reels_batch(req: BatchReelRequest, user=Depends(current_user)):
     validate_settings(req)
+    oa, gk = user_keys(user)
+    if not (oa or gk) and not user.get("is_subscribed"):
+        raise HTTPException(402, "Batch generation needs your own OpenAI/Google key or a subscription.")
     topics = [t.strip() for t in (req.topics or []) if t.strip()]
     if not topics:
         raise HTTPException(400, "At least one topic is required")
@@ -667,7 +811,7 @@ async def create_reels_batch(req: BatchReelRequest):
     created = []
     for topic in topics:
         title = topic[:48].strip()
-        doc = build_reel_doc(req, "topic", topic, None, title)
+        doc = build_reel_doc(req, "topic", topic, None, title, user_id=user["id"])
         if sched_iso:
             doc["status"] = "scheduled"
             doc["scheduled_at"] = sched_iso
@@ -698,8 +842,8 @@ async def add_download(reel_id: str):
 
 
 @api_router.get("/reels")
-async def list_reels():
-    docs = await db.reels.find().sort("created_at", -1).to_list(200)
+async def list_reels(user=Depends(current_user)):
+    docs = await db.reels.find({"user_id": user["id"]}).sort("created_at", -1).to_list(200)
     return [public_reel(d) for d in docs]
 
 
@@ -748,13 +892,14 @@ async def get_thumb(reel_id: str):
 
 
 @api_router.post("/series")
-async def create_series(req: SeriesCreate):
+async def create_series(req: SeriesCreate, user=Depends(current_user)):
     validate_settings(req)
     if not req.title.strip():
         raise HTTPException(400, "Series title is required")
     settings = {k: getattr(req, k) for k in ReelSettings.model_fields}
     doc = {
         "id": str(uuid.uuid4()),
+        "user_id": user["id"],
         "title": req.title.strip()[:80],
         "premise": (req.premise or "").strip()[:1200],
         "tone": (req.tone or "").strip()[:120],
@@ -769,26 +914,30 @@ async def create_series(req: SeriesCreate):
 
 
 @api_router.post("/series/suggest")
-async def suggest_series_characters(req: SuggestRequest):
+async def suggest_series_characters(req: SuggestRequest, user=Depends(current_user)):
     if not req.premise.strip():
         raise HTTPException(400, "Premise is required")
+    oa, gk = user_keys(user)
+    pipeline.set_user_keys(oa, gk)
     try:
         chars = await pipeline.suggest_characters(req.premise.strip(), req.tone.strip(), req.count)
     except Exception as e:  # noqa: BLE001
         code, friendly = classify_error(e)
-        raise HTTPException(402 if code == "budget" else 500, friendly)
+        raise HTTPException(402 if code in ("budget", "key") else 500, friendly)
+    finally:
+        pipeline.set_user_keys("", "")
     return {"characters": chars}
 
 
 @api_router.get("/series")
-async def list_series():
-    docs = await db.series.find().sort("created_at", -1).to_list(100)
+async def list_series(user=Depends(current_user)):
+    docs = await db.series.find({"user_id": user["id"]}).sort("created_at", -1).to_list(100)
     return [public_series(d) for d in docs]
 
 
 @api_router.get("/series/{series_id}")
-async def get_series(series_id: str):
-    doc = await db.series.find_one({"id": series_id})
+async def get_series(series_id: str, user=Depends(current_user)):
+    doc = await db.series.find_one({"id": series_id, "user_id": user["id"]})
     if not doc:
         raise HTTPException(404, "Series not found")
     reels = await db.reels.find({"series_id": series_id}).sort("episode_number", 1).to_list(200)
@@ -796,8 +945,8 @@ async def get_series(series_id: str):
 
 
 @api_router.delete("/series/{series_id}")
-async def delete_series(series_id: str):
-    doc = await db.series.find_one({"id": series_id})
+async def delete_series(series_id: str, user=Depends(current_user)):
+    doc = await db.series.find_one({"id": series_id, "user_id": user["id"]})
     if not doc:
         raise HTTPException(404, "Series not found")
     await db.series.delete_one({"id": series_id})
@@ -805,20 +954,22 @@ async def delete_series(series_id: str):
 
 
 @api_router.post("/series/{series_id}/episode")
-async def create_series_episode(series_id: str, req: EpisodeRequest):
-    series = await db.series.find_one({"id": series_id})
+async def create_series_episode(series_id: str, req: EpisodeRequest, user=Depends(current_user)):
+    series = await db.series.find_one({"id": series_id, "user_id": user["id"]})
     if not series:
         raise HTTPException(404, "Series not found")
+    await enforce_quota(user)
     s = ReelSettings(**(series.get("settings") or {}))
     ep = int(series.get("episode_count", 0)) + 1
     topic = (req.topic or "").strip() or None
     title = f"{series['title']} — Ep {ep}"
     display_topic = topic or (series.get("premise") or series["title"])[:60]
     doc = build_reel_doc(s, "topic", display_topic, None, title,
-                         series_id=series_id, episode_number=ep)
+                         series_id=series_id, episode_number=ep, user_id=user["id"])
     # keep the raw user topic (None -> AI continues the story on its own)
     doc["topic"] = topic
     await db.reels.insert_one(doc)
+    await consume_quota(user)
     await db.series.update_one({"id": series_id},
                                {"$set": {"episode_count": ep, "updated_at": now_iso()}})
 
@@ -976,33 +1127,77 @@ def _mask_key(k: str) -> str:
     return (k[:3] + "••••" + k[-4:]) if len(k) > 10 else "••••"
 
 
+@api_router.post("/auth/register")
+async def register(body: AuthIn):
+    email = body.email.strip().lower()
+    if "@" not in email or "." not in email:
+        raise HTTPException(400, "Enter a valid email")
+    if len(body.password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(409, "An account with this email already exists")
+    uid = str(uuid.uuid4())
+    await db.users.insert_one({
+        "id": uid, "email": email, "password_hash": hash_pw(body.password),
+        "free_used": 0, "is_subscribed": False,
+        "openai_key_enc": None, "google_key_enc": None, "brand_handle": "",
+        "created_at": now_iso(),
+    })
+    user = await db.users.find_one({"id": uid})
+    return {"access_token": make_token(uid), "user": public_user(user)}
+
+
+@api_router.post("/auth/login")
+async def login(body: AuthIn):
+    email = body.email.strip().lower()
+    user = await db.users.find_one({"email": email})
+    stored = user["password_hash"] if user else DUMMY_HASH
+    if not user or not verify_pw(body.password, stored):
+        raise HTTPException(401, "Incorrect email or password")
+    return {"access_token": make_token(user["id"]), "user": public_user(user)}
+
+
+@api_router.get("/auth/me")
+async def auth_me(user=Depends(current_user)):
+    return public_user(user)
+
+
 @api_router.get("/settings")
-async def get_settings():
-    doc = await db.app_settings.find_one({"id": SETTINGS_ID}) or {}
-    return {
-        "openai_key_set": bool(doc.get("openai_key")),
-        "openai_key_masked": _mask_key(doc.get("openai_key", "")),
-        "google_key_set": bool(doc.get("google_key")),
-        "google_key_masked": _mask_key(doc.get("google_key", "")),
-        "brand_handle": doc.get("brand_handle") or "",
-    }
+async def get_settings(user=Depends(current_user)):
+    return public_user(user)
 
 
 @api_router.put("/settings")
-async def update_settings(req: SettingsUpdate):
-    doc = await db.app_settings.find_one({"id": SETTINGS_ID}) or {"id": SETTINGS_ID}
+async def update_settings(req: SettingsUpdate, user=Depends(current_user)):
+    upd = {}
     if req.openai_key is not None:
-        doc["openai_key"] = req.openai_key.strip()
+        upd["openai_key_enc"] = enc_key(req.openai_key.strip(), user["id"], "openai") if req.openai_key.strip() else None
     if req.google_key is not None:
-        doc["google_key"] = req.google_key.strip()
+        upd["google_key_enc"] = enc_key(req.google_key.strip(), user["id"], "google") if req.google_key.strip() else None
     if req.brand_handle is not None:
-        doc["brand_handle"] = req.brand_handle.strip()[:40]
-    doc["updated_at"] = now_iso()
-    await db.app_settings.update_one({"id": SETTINGS_ID}, {"$set": doc}, upsert=True)
-    pipeline.set_user_keys(doc.get("openai_key", ""), doc.get("google_key", ""))
-    logger.info("Settings updated (openai=%s, google=%s)",
-                bool(doc.get("openai_key")), bool(doc.get("google_key")))
-    return await get_settings()
+        upd["brand_handle"] = req.brand_handle.strip()[:40]
+    if upd:
+        await db.users.update_one({"id": user["id"]}, {"$set": upd})
+    fresh = await db.users.find_one({"id": user["id"]})
+    return public_user(fresh)
+
+
+@api_router.post("/settings/test")
+async def test_keys(req: TestKeysRequest, user=Depends(current_user)):
+    out = {}
+    if req.openai_key and req.openai_key.strip():
+        try:
+            await pipeline.validate_openai_key(req.openai_key.strip())
+            out["openai"] = {"ok": True, "message": "Valid — ready to save"}
+        except Exception:  # noqa: BLE001
+            out["openai"] = {"ok": False, "message": "OpenAI rejected this key"}
+    if req.google_key and req.google_key.strip():
+        try:
+            await run_in_threadpool(pipeline.validate_google_key, req.google_key.strip())
+            out["google"] = {"ok": True, "message": "Valid — ready to save"}
+        except Exception:  # noqa: BLE001
+            out["google"] = {"ok": False, "message": "Google rejected this key"}
+    return out
 
 
 app.include_router(api_router)
@@ -1042,12 +1237,10 @@ async def startup():
     except Exception as e:  # noqa: BLE001
         logger.warning("Object storage init failed (will retry on demand): %s", e)
     try:
-        doc = await db.app_settings.find_one({"id": SETTINGS_ID}) or {}
-        pipeline.set_user_keys(doc.get("openai_key", ""), doc.get("google_key", ""))
-        if doc.get("openai_key") or doc.get("google_key"):
-            logger.info("Loaded user BYOK keys from settings")
+        await db.users.create_index("email", unique=True)
+        await db.users.create_index("id", unique=True)
     except Exception as e:  # noqa: BLE001
-        logger.warning("Settings load failed: %s", e)
+        logger.warning("User index setup: %s", e)
     asyncio.create_task(scheduler_loop())
 
 
