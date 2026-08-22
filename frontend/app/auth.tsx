@@ -41,7 +41,7 @@ export default function AuthScreen() {
           <View style={styles.logo}>
             <Ionicons name="flash" size={34} color={colors.brand} />
           </View>
-          <Text style={styles.brand}>FACELESS AI REELS</Text>
+          <Text style={styles.brand}>GHOSTREELS ALPHA</Text>
           <Text style={styles.tagline}>Turn any idea into a TikTok-ready video.</Text>
 
           <View style={styles.segment}>

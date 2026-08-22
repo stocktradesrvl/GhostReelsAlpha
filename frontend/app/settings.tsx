@@ -55,7 +55,7 @@ export default function SettingsScreen() {
 
   const openSupport = useCallback(() => {
     haptic.select();
-    const subject = encodeURIComponent("GhostReel support");
+    const subject = encodeURIComponent("GhostReelsAlpha support");
     Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${subject}`);
   }, []);
 
@@ -346,7 +346,7 @@ export default function SettingsScreen() {
             </Text>
           )}
           <Text style={styles.aboutText}>
-            Faceless AI Reels turns any topic into a TikTok-ready vertical video.{"\n\n"}
+            GhostReelsAlpha turns any topic into a TikTok-ready vertical video.{"\n\n"}
             Out of free reels? Subscribe for unlimited generation, or paste your own OpenAI/Google key above to generate freely.
           </Text>
           {!!user && <Text style={styles.version}>Signed in as {user.email} · v1.0</Text>}

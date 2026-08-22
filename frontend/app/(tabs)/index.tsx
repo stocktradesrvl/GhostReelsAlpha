@@ -267,7 +267,7 @@ export default function CreateScreen() {
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
         <View>
-          <Text style={styles.brand}>FACELESS REELS</Text>
+          <Text style={styles.brand}>GHOSTREELS ALPHA</Text>
           <Text style={styles.sub}>Topic → script → voice → captions → MP4</Text>
         </View>
         <View style={styles.headerRight}>

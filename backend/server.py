@@ -60,7 +60,7 @@ PRIVACY_POLICY_HTML = """<!doctype html>
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>GhostReel — Privacy Policy</title>
+<title>GhostReelsAlpha — Privacy Policy</title>
 <style>
   :root { color-scheme: dark; }
   body { margin:0; background:#0A0A0A; color:#E7E5E4; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; line-height:1.6; }
@@ -77,8 +77,8 @@ PRIVACY_POLICY_HTML = """<!doctype html>
 <body>
   <div class="wrap">
     <h1>Privacy Policy</h1>
-    <p class="muted">GhostReel — Faceless AI Reels. Last updated: June 2026.</p>
-    <p>This policy explains what GhostReel ("we", "the app") collects, how we use it, and the choices you have. We keep data collection to the minimum needed to run the app.</p>
+    <p class="muted">GhostReelsAlpha — Faceless AI Reels. Last updated: June 2026.</p>
+    <p>This policy explains what GhostReelsAlpha ("we", "the app") collects, how we use it, and the choices you have. We keep data collection to the minimum needed to run the app.</p>
 
     <h2>Information we collect</h2>
     <ul>
@@ -107,7 +107,7 @@ PRIVACY_POLICY_HTML = """<!doctype html>
     <p>You can delete your account and all associated data at any time from <strong>Settings → Delete account</strong> in the app. This permanently removes your account, your reels, and your encrypted API keys from our systems.</p>
 
     <h2>Children</h2>
-    <p>GhostReel is not directed at children under 13, and we do not knowingly collect personal information from children under 13.</p>
+    <p>GhostReelsAlpha is not directed at children under 13, and we do not knowingly collect personal information from children under 13.</p>
 
     <h2>Third-party services</h2>
     <p>We rely on service providers to operate the app, including OpenAI and Google (AI generation), RevenueCat and Apple/Google (subscriptions and payments), and our cloud hosting/storage. Your use of AI features is also subject to those providers' terms.</p>
@@ -116,7 +116,7 @@ PRIVACY_POLICY_HTML = """<!doctype html>
     <p>Questions or requests about your privacy? Email <a href="mailto:russngina@gmail.com">russngina@gmail.com</a>.</p>
 
     <hr/>
-    <p class="muted">By using GhostReel you agree to this Privacy Policy.</p>
+    <p class="muted">By using GhostReelsAlpha you agree to this Privacy Policy.</p>
   </div>
 </body>
 </html>"""
@@ -127,7 +127,7 @@ TERMS_OF_SERVICE_HTML = """<!doctype html>
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>GhostReel — Terms of Service</title>
+<title>GhostReelsAlpha — Terms of Service</title>
 <style>
   :root { color-scheme: dark; }
   body { margin:0; background:#0A0A0A; color:#E7E5E4; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; line-height:1.6; }
@@ -144,14 +144,14 @@ TERMS_OF_SERVICE_HTML = """<!doctype html>
 <body>
   <div class="wrap">
     <h1>Terms of Service</h1>
-    <p class="muted">GhostReel — Faceless AI Reels. Last updated: June 2026.</p>
-    <p>These Terms govern your use of the GhostReel app. By creating an account or using the app, you agree to these Terms. If you do not agree, do not use the app.</p>
+    <p class="muted">GhostReelsAlpha — Faceless AI Reels. Last updated: June 2026.</p>
+    <p>These Terms govern your use of the GhostReelsAlpha app. By creating an account or using the app, you agree to these Terms. If you do not agree, do not use the app.</p>
 
     <h2>1. The service</h2>
-    <p>GhostReel turns your topics or scripts into short vertical videos using AI (voiceover, captions, visuals, and rendering). Features and availability may change over time.</p>
+    <p>GhostReelsAlpha turns your topics or scripts into short vertical videos using AI (voiceover, captions, visuals, and rendering). Features and availability may change over time.</p>
 
     <h2>2. Eligibility &amp; accounts</h2>
-    <p>You must be at least 13 years old to use GhostReel. You are responsible for keeping your login credentials secure and for all activity under your account.</p>
+    <p>You must be at least 13 years old to use GhostReelsAlpha. You are responsible for keeping your login credentials secure and for all activity under your account.</p>
 
     <h2>3. Your content &amp; responsibility</h2>
     <ul>
@@ -189,7 +189,7 @@ TERMS_OF_SERVICE_HTML = """<!doctype html>
     <p>Questions about these Terms? Email <a href="mailto:russngina@gmail.com">russngina@gmail.com</a>.</p>
 
     <hr/>
-    <p class="muted">By using GhostReel you agree to these Terms of Service.</p>
+    <p class="muted">By using GhostReelsAlpha you agree to these Terms of Service.</p>
   </div>
 </body>
 </html>"""
