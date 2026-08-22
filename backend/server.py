@@ -19,6 +19,8 @@ import storage_client
 from reels_config import (
     BG_MAP,
     BG_THEMES,
+    CAPTION_FONT_MAP,
+    CAPTION_FONTS,
     CAPTION_MAP,
     CAPTION_POSITION_MAP,
     CAPTION_POSITIONS,
@@ -73,18 +75,20 @@ class CreateReelRequest(BaseModel):
     caption_style: str = "signal"
     caption_position: str = "center"
     caption_size: str = "m"
+    caption_font: str = "barlow"
     bg_theme: str = "ember"
     music_id: str = "none"
     music_volume: float = 0.13
     watermark: Optional[str] = None
     hook_enabled: bool = False
+    endcard_text: Optional[str] = None
 
 
 PUBLIC_FIELDS = {
     "id", "title", "input_mode", "topic", "script", "seconds", "voice_id", "voice_speed",
-    "caption_style", "caption_position", "caption_size", "bg_theme", "music_id",
-    "music_volume", "watermark", "hook_enabled", "status", "progress", "stage_label", "error",
-    "duration", "word_count", "has_video", "created_at", "updated_at",
+    "caption_style", "caption_position", "caption_size", "caption_font", "bg_theme", "music_id",
+    "music_volume", "watermark", "hook_enabled", "endcard_text", "status", "progress",
+    "stage_label", "error", "duration", "word_count", "has_video", "created_at", "updated_at",
 }
 
 
@@ -132,6 +136,8 @@ async def run_pipeline(reel_id: str):
             size=reel.get("caption_size", "m"),
             watermark=reel.get("watermark") or "",
             hook_text=pipeline.hook_line(script) if reel.get("hook_enabled") else "",
+            caption_font=reel.get("caption_font", "barlow"),
+            endcard_text=reel.get("endcard_text") or "",
         )
 
         # Stage 4: render
@@ -186,6 +192,7 @@ async def get_config():
         "caption_styles": CAPTION_STYLES,
         "caption_positions": CAPTION_POSITIONS,
         "caption_sizes": CAPTION_SIZES,
+        "caption_fonts": CAPTION_FONTS,
         "bg_themes": BG_THEMES,
         "music_tracks": MUSIC_TRACKS,
     }
@@ -222,6 +229,8 @@ async def create_reel(req: CreateReelRequest):
         raise HTTPException(400, "Unknown caption position")
     if req.caption_size not in CAPTION_SIZE_MAP:
         raise HTTPException(400, "Unknown caption size")
+    if req.caption_font not in CAPTION_FONT_MAP:
+        raise HTTPException(400, "Unknown caption font")
     if req.bg_theme not in BG_MAP:
         raise HTTPException(400, "Unknown background theme")
     if req.music_id not in MUSIC_MAP:
@@ -250,11 +259,13 @@ async def create_reel(req: CreateReelRequest):
         "caption_style": req.caption_style,
         "caption_position": req.caption_position,
         "caption_size": req.caption_size,
+        "caption_font": req.caption_font,
         "bg_theme": req.bg_theme,
         "music_id": req.music_id,
         "music_volume": max(0.0, min(1.0, float(req.music_volume))),
         "watermark": (req.watermark or "").strip()[:32] or None,
         "hook_enabled": bool(req.hook_enabled),
+        "endcard_text": (req.endcard_text or "").strip()[:40] or None,
         "status": "queued",
         "progress": 0,
         "stage_label": "Queued",

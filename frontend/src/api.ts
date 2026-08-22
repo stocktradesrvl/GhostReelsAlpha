@@ -5,6 +5,7 @@ export type VoiceSpeed = { id: string; name: string };
 export type CaptionStyle = { id: string; name: string; hint: string; hex: string };
 export type CaptionPosition = { id: string; name: string };
 export type CaptionSize = { id: string; name: string };
+export type CaptionFont = { id: string; name: string };
 export type BgTheme = { id: string; name: string; preview: string[] };
 export type MusicTrack = { id: string; name: string };
 export type Config = {
@@ -13,6 +14,7 @@ export type Config = {
   caption_styles: CaptionStyle[];
   caption_positions: CaptionPosition[];
   caption_sizes: CaptionSize[];
+  caption_fonts: CaptionFont[];
   bg_themes: BgTheme[];
   music_tracks: MusicTrack[];
 };
@@ -33,11 +35,13 @@ export type Reel = {
   caption_style: string;
   caption_position: string;
   caption_size: string;
+  caption_font: string;
   bg_theme: string;
   music_id: string;
   music_volume: number;
   watermark: string | null;
   hook_enabled: boolean;
+  endcard_text: string | null;
   status: ReelStatus;
   progress: number;
   stage_label: string;

@@ -1,0 +1,35 @@
+{
+  "summary": "Validated fourth batch of Faceless AI Reels features: (1) Music Fade (always-on when a track is chosen, no UI field), (2) Caption Font Styles (barlow/anton/archivo), (3) Duplicate Reel flow via router param dup=<id>, (4) End Card CTA (endcard_text). Backend: added /app/backend/tests/test_reels_fourth_batch.py — 3/3 pytest cases passed in 9.06s. GET /api/config now exposes caption_fonts [{barlow},{anton},{archivo}] alongside all prior catalogs (voices, voice_speeds, caption_styles, caption_positions, caption_sizes, bg_themes, music_tracks). POST /api/reels with invalid caption_font='comic-sans' correctly returns 400. End-to-end reel {input_mode:'script', script:'Three tips for better sleep...', voice=echo, caption_style=signal, caption_position=center, caption_size=l, caption_font=archivo, bg=mono, music=lofi, music_volume=0.15, endcard_text='Follow for more'} reached status=ready quickly; GET /api/reels/{id} echoed caption_font='archivo' and endcard_text='Follow for more', has_video=true; GET /api/reels/{id}/video returned 200 video/mp4 (>10KB). Frontend (Expo web @ 390x844): Create screen renders 'CAPTION FONT' chip row with testIDs caption-font-barlow|anton|archivo, all visible and tappable; 'END CARD · OPTIONAL' TextInput (testID endcard-input) accepts text ('Follow for more'). Duplicate flow verified end-to-end: opened existing ready reel (Sleep endcard fix / id=0277154d…) via direct URL, 'Duplicate & edit' button (testID duplicate-button) present on detail screen; tapping it navigated to /?dup=<id> (Create tab) and pre-filled mode=script, script textarea with the source reel's full script, endcard-input with 'Follow for more', and Studio Settings summary showed Voice=Echo, Captions=Signal, Background=Graphite, Music=Lo-Fi Chill — matching the source reel exactly. Only ONE new reel created (auto-deleted after test); LLM budget preserved. Pre-existing non-blocking warnings persist (React 19 element.ref, props.pointerEvents deprecation) — carried over from iteration_2/3; no new red-screen errors.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "props.pointerEvents deprecation", "issue": "Console warning `props.pointerEvents is deprecated. Use style.pointerEvents`. Non-blocking on web. Pre-existing; not introduced by this batch."},
+      {"component": "React 19 element.ref", "issue": "Pre-existing warning from prior batches; still present, non-blocking."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_reels_fourth_batch.py",
+    "/app/test_reports/pytest/pytest_fourth_batch.xml"
+  ],
+  "action_items": [
+    "Optional: migrate `pointerEvents` prop usages to `style.pointerEvents` to silence the React Native web deprecation warning (not a functional issue)."
+  ],
+  "critical_code_review_comments": [
+    "server.py:232 validates caption_font against CAPTION_FONT_MAP with 400 error — verified.",
+    "server.py:195 config endpoint exposes caption_fonts catalog — verified.",
+    "server.py:268 endcard_text is trimmed and clamped to 40 chars before storage — matches maxLength on the TextInput (index.tsx:397).",
+    "index.tsx:63-86 dup effect uses appliedDup ref + router.setParams({dup:''}) to avoid re-applying, correct idempotency.",
+    "reel/[id].tsx:161-165 duplicate() pushes /(tabs) with dup=<id> — clean router usage.",
+    "pipeline.build_ass is passed caption_font & endcard_text (server.py:139-140), so libass font family switches and captions clamp before endcard as designed."
+  ],
+  "updated_files": ["/app/backend/tests/test_reels_fourth_batch.py (new)"],
+  "success_rate": {"backend": "100% (3/3)", "frontend": "100% (caption-font chips, endcard input, duplicate flow all verified)"},
+  "seed_data_creation": "One end-to-end reel created & auto-deleted by the fourth-batch test. Existing demo reels untouched and reused for the duplicate flow test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: `cd /app/backend && pytest tests/test_reels_fourth_batch.py -v --junitxml=/app/test_reports/pytest/pytest_fourth_batch.xml`. Frontend testIDs of interest: caption-font-{barlow|anton|archivo}, endcard-input, duplicate-button. Duplicate flow: from /reel/{id} tap duplicate-button -> lands on /?dup={id} -> Create screen auto pre-fills all settings (script/topic/voice/captions/bg/music/endcard) then clears the dup param. Music fade is server-side only (ffmpeg afade in/out) — no UI knob to test.",
+  "rca_of_issue": "No bugs found. All four fourth-batch features work correctly end-to-end."
+}

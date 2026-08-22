@@ -136,11 +136,13 @@ export default function ReelDetail() {
         caption_style: reel.caption_style,
         caption_position: reel.caption_position,
         caption_size: reel.caption_size,
+        caption_font: reel.caption_font,
         bg_theme: reel.bg_theme,
         music_id: reel.music_id,
         music_volume: reel.music_volume,
         watermark: reel.watermark || undefined,
         hook_enabled: reel.hook_enabled,
+        endcard_text: reel.endcard_text || undefined,
       } as any);
       celebrated.current = false;
       router.replace(`/reel/${fresh.id}`);
@@ -154,6 +156,12 @@ export default function ReelDetail() {
     haptic.medium();
     await api.deleteReel(id);
     router.back();
+  }, [id, router]);
+
+  const duplicate = useCallback(() => {
+    if (!id) return;
+    haptic.light();
+    router.push({ pathname: "/(tabs)", params: { dup: id } });
   }, [id, router]);
 
   const grad = BG_PREVIEW[reel?.bg_theme || "ember"] || BG_PREVIEW.ember;
@@ -252,6 +260,14 @@ export default function ReelDetail() {
                 )}
               </>
             )}
+            <PrimaryButton
+              testID="duplicate-button"
+              variant="ghost"
+              label="Duplicate & edit"
+              icon="copy-outline"
+              onPress={duplicate}
+              style={{ marginTop: spacing.sm }}
+            />
             <PrimaryButton
               testID="new-reel-button"
               variant="ghost"

@@ -14,6 +14,7 @@ from emergentintegrations.llm.openai import OpenAISpeechToText, OpenAITextToSpee
 
 from reels_config import (
     BG_MAP,
+    CAPTION_FONT_MAP,
     CAPTION_MAP,
     CAPTION_POSITION_MAP,
     CAPTION_SIZE_MAP,
@@ -155,9 +156,9 @@ def _ass_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("{", "(").replace("}", ")")
 
 
-def _ass_header(fontsize: int, alignment: int, marginv: int) -> str:
+def _ass_header(fontsize: int, alignment: int, marginv: int, fontname: str = "Barlow Condensed") -> str:
     # White base fill, thick black outline for readability on any gradient.
-    # A second "WM" style is used for an optional top watermark.
+    # WM = watermark, Hook = opening title flash, End = closing CTA card.
     return (
         "[Script Info]\n"
         "ScriptType: v4.00+\n"
@@ -169,12 +170,14 @@ def _ass_header(fontsize: int, alignment: int, marginv: int) -> str:
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
         "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
         "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Cap,Barlow Condensed,{fontsize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,"
+        f"Style: Cap,{fontname},{fontsize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,"
         f"-1,0,0,0,100,100,1,0,1,7,3,{alignment},120,120,{marginv},1\n"
         "Style: WM,Barlow Condensed,46,&H2EFFFFFF,&H2EFFFFFF,&H80000000,&H00000000,"
         "0,0,0,0,100,100,2,0,1,2,0,8,60,60,60,1\n"
         "Style: Hook,Barlow Condensed,96,&H0000E5FF,&H0000E5FF,&H00000000,&H64000000,"
-        "-1,0,0,0,100,100,1,0,1,8,2,8,80,80,560,1\n\n"
+        "-1,0,0,0,100,100,1,0,1,8,2,8,80,80,560,1\n"
+        "Style: End,Barlow Condensed,104,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,"
+        "-1,0,0,0,100,100,1,0,1,7,3,5,120,120,0,1\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
@@ -194,15 +197,17 @@ def _fmt_time(t: float) -> str:
 
 def build_ass(words, duration, caption_style: str, out_path: str,
               position: str = "center", size: str = "m", watermark: str = "",
-              hook_text: str = "") -> None:
+              hook_text: str = "", caption_font: str = "barlow", endcard_text: str = "") -> None:
     color = CAPTION_MAP.get(caption_style, CAPTION_MAP["signal"])["ass_color"]
     pos = CAPTION_POSITION_MAP.get(position, CAPTION_POSITION_MAP["center"])
     sz = CAPTION_SIZE_MAP.get(size, CAPTION_SIZE_MAP["m"])
-    header = _ass_header(sz["fontsize"], pos["an"], pos["marginv"])
+    fam = CAPTION_FONT_MAP.get(caption_font, CAPTION_FONT_MAP["barlow"])["family"]
+    header = _ass_header(sz["fontsize"], pos["an"], pos["marginv"], fontname=fam)
     lines = [header]
 
     wm = _sanitize_watermark(watermark)
     total = max(1.0, float(duration or 1.0))
+    cap_limit = total  # captions must clear before the end card (if any)
     if wm:
         lines.append(
             f"Dialogue: 1,{_fmt_time(0)},{_fmt_time(total)},WM,,0,0,0,,{_ass_escape(wm)}\n"
@@ -216,8 +221,17 @@ def build_ass(words, duration, caption_style: str, out_path: str,
             f"Dialogue: 2,{_fmt_time(0.12)},{_fmt_time(hook_end)},Hook,,0,0,0,,{pop}{hk}\n"
         )
 
+    ec = _ass_escape((endcard_text or "").strip().upper())
+    if ec:
+        ec_start = max(0.0, total - 1.6)
+        cap_limit = ec_start
+        ecpop = "{\\fad(180,120)\\fscx70\\fscy70\\t(0,260,\\fscx103\\fscy103)\\t(260,420,\\fscx100\\fscy100)}"
+        lines.append(
+            f"Dialogue: 3,{_fmt_time(ec_start)},{_fmt_time(total)},End,,0,0,0,,{ecpop}{ec}\n"
+        )
+
     if not words:
-        # Fallback: no timestamps -> keep watermark/hook only (video still renders).
+        # Fallback: no timestamps -> keep watermark/hook/endcard only (video still renders).
         Path(out_path).write_text("".join(lines), encoding="utf-8")
         return
 
@@ -229,12 +243,15 @@ def build_ass(words, duration, caption_style: str, out_path: str,
         )
         for wi, w in enumerate(group):
             seg_start = w["start"]
+            if seg_start >= cap_limit:
+                continue
             if wi + 1 < len(group):
                 seg_end = group[wi + 1]["start"]
             else:
                 seg_end = next_group_start
             if seg_end <= seg_start:
                 seg_end = seg_start + 0.15
+            seg_end = min(seg_end, cap_limit)
 
             parts = []
             for k, gw in enumerate(group):
@@ -288,9 +305,11 @@ async def render_video(audio_path: str, ass_name: str, bg_theme: str, duration: 
     inputs = ["-f", "lavfi", "-i", grad, "-i", audio_path]
     if music_path:
         vol = max(0.0, min(1.0, float(music_volume)))
+        fout = max(0.1, dur - 1.0)
         inputs += ["-stream_loop", "-1", "-i", music_path]
         achain = (
-            f"[1:a]volume=1.0[va];[2:a]volume={vol:.3f}[ma];"
+            f"[1:a]volume=1.0[va];"
+            f"[2:a]volume={vol:.3f},afade=t=in:st=0:d=0.8,afade=t=out:st={fout:.2f}:d=1.0[ma];"
             f"[va][ma]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]"
         )
         filter_complex = f"{vchain};{achain}"

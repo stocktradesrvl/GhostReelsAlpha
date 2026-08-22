@@ -65,6 +65,14 @@ CAPTION_SIZES = [
 ]
 CAPTION_SIZE_MAP = {s["id"]: s for s in CAPTION_SIZES}
 
+# Caption fonts -> libass font family name (files live in assets/fonts).
+CAPTION_FONTS = [
+    {"id": "barlow", "name": "Barlow", "family": "Barlow Condensed"},
+    {"id": "anton", "name": "Anton", "family": "Anton"},
+    {"id": "archivo", "name": "Archivo", "family": "Archivo Black"},
+]
+CAPTION_FONT_MAP = {f["id"]: f for f in CAPTION_FONTS}
+
 # Background music beds (CC0). `file` is relative to assets/music; None = silent.
 MUSIC_TRACKS = [
     {"id": "none", "name": "No music", "file": None},

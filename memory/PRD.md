@@ -57,6 +57,11 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
   (`hook_enabled` burns the opening line as an amber title card in first ~2s via libass);
   **Save to Gallery** (native, expo-media-library with full permission handling + Open Settings
   fallback; web falls back to Download). Tested: backend 4/4 + frontend 5/5 pass.
+- **Follow-up (2026-08 · batch 4): Music Fade** (afade in/out on the music bed); **Caption Font
+  Styles** (`caption_font`: Barlow Condensed / Anton / Archivo Black via libass); **Duplicate Reel**
+  ('Duplicate & edit' opens Create pre-filled via `?dup=<id>`); **End Card CTA** (`endcard_text`
+  burns a closing card in the final ~1.6s; captions clamp to clear before it). Tested: backend 3/3
+  + frontend pass (incl. full duplicate prefill flow).
 
 ## Backlog
 - P1: multiple caption layout presets; background music track option; ElevenLabs voice option.

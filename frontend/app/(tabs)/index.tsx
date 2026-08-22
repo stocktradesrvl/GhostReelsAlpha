@@ -1,7 +1,7 @@
 import { BottomSheetModal } from "@gorhom/bottom-sheet";
 import { Ionicons } from "@expo/vector-icons";
 import Slider from "@react-native-community/slider";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
@@ -20,6 +20,8 @@ const DURATIONS = [15, 30, 60];
 export default function CreateScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const params = useLocalSearchParams<{ dup?: string }>();
+  const appliedDup = useRef<string | null>(null);
 
   const [config, setConfig] = useState<Config | null>(null);
   const [mode, setMode] = useState<"topic" | "script">("topic");
@@ -31,11 +33,13 @@ export default function CreateScreen() {
   const [captionStyle, setCaptionStyle] = useState("signal");
   const [captionPosition, setCaptionPosition] = useState("center");
   const [captionSize, setCaptionSize] = useState("m");
+  const [captionFont, setCaptionFont] = useState("barlow");
   const [bgTheme, setBgTheme] = useState("ember");
   const [musicId, setMusicId] = useState("none");
   const [musicVolume, setMusicVolume] = useState(0.13);
   const [watermark, setWatermark] = useState("");
   const [hookEnabled, setHookEnabled] = useState(false);
+  const [endcardText, setEndcardText] = useState("");
   const [previewingVoice, setPreviewingVoice] = useState<string | null>(null);
   const [writing, setWriting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -54,6 +58,32 @@ export default function CreateScreen() {
       if (c.bg_themes[0]) setBgTheme(c.bg_themes[0].id);
     }).catch(() => setError("Couldn't load options. Pull to retry."));
   }, []);
+
+  useEffect(() => {
+    const dup = params.dup;
+    if (!dup || appliedDup.current === dup) return;
+    appliedDup.current = dup;
+    api.getReel(dup).then((r) => {
+      setMode(r.input_mode);
+      setTopic(r.topic || "");
+      setScript(r.script || "");
+      setSeconds(r.seconds);
+      setVoiceId(r.voice_id);
+      setVoiceSpeed(r.voice_speed);
+      setCaptionStyle(r.caption_style);
+      setCaptionPosition(r.caption_position);
+      setCaptionSize(r.caption_size);
+      setCaptionFont(r.caption_font);
+      setBgTheme(r.bg_theme);
+      setMusicId(r.music_id);
+      setMusicVolume(r.music_volume);
+      setWatermark(r.watermark || "");
+      setHookEnabled(r.hook_enabled);
+      setEndcardText(r.endcard_text || "");
+      haptic.light();
+      router.setParams({ dup: "" });
+    }).catch(() => {});
+  }, [params.dup, router]);
 
   const previewVoice = useCallback((id: string) => {
     if (previewingVoice === id) {
@@ -121,11 +151,13 @@ export default function CreateScreen() {
         caption_style: captionStyle,
         caption_position: captionPosition,
         caption_size: captionSize,
+        caption_font: captionFont,
         bg_theme: bgTheme,
         music_id: musicId,
         music_volume: musicVolume,
         watermark: watermark.trim() || undefined,
         hook_enabled: hookEnabled,
+        endcard_text: endcardText.trim() || undefined,
       } as any);
       haptic.heavy();
       router.push(`/reel/${reel.id}`);
@@ -135,7 +167,7 @@ export default function CreateScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [canGenerate, mode, topic, script, seconds, voiceId, voiceSpeed, captionStyle, captionPosition, captionSize, bgTheme, musicId, musicVolume, watermark, hookEnabled, router]);
+  }, [canGenerate, mode, topic, script, seconds, voiceId, voiceSpeed, captionStyle, captionPosition, captionSize, captionFont, bgTheme, musicId, musicVolume, watermark, hookEnabled, endcardText, router]);
 
   return (
     <View style={styles.root}>
@@ -318,6 +350,14 @@ export default function CreateScreen() {
           onChange={setCaptionSize}
         />
 
+        <Text style={styles.section}>CAPTION FONT</Text>
+        <ChipSelector
+          testID="caption-font"
+          options={config?.caption_fonts || []}
+          value={captionFont}
+          onChange={setCaptionFont}
+        />
+
         <View style={styles.toggleRow}>
           <View style={styles.settingLeft}>
             <Ionicons name="flash-outline" size={18} color={colors.onSurfaceSecondary} />
@@ -344,6 +384,17 @@ export default function CreateScreen() {
           placeholderTextColor={colors.onSurfaceSecondary}
           maxLength={32}
           autoCapitalize="none"
+          style={[styles.input, { height: 48, paddingVertical: 0 }]}
+        />
+
+        <Text style={styles.section}>END CARD · OPTIONAL</Text>
+        <TextInput
+          testID="endcard-input"
+          value={endcardText}
+          onChangeText={setEndcardText}
+          placeholder="Follow for more"
+          placeholderTextColor={colors.onSurfaceSecondary}
+          maxLength={40}
           style={[styles.input, { height: 48, paddingVertical: 0 }]}
         />
 
