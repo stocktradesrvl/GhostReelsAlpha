@@ -1357,6 +1357,15 @@ async def terms_of_service():
     return HTMLResponse(content=TERMS_OF_SERVICE_HTML)
 
 
+@api_router.get("/appstore-icon.png")
+async def appstore_icon():
+    """Direct download of the correct no-wordmark 1024x1024 app icon."""
+    f = Path("/app/frontend/assets/images/icon.png")
+    if not f.is_file():
+        raise HTTPException(404, "not available")
+    return FileResponse(str(f), media_type="image/png", filename="ghostreelsalpha-icon-1024.png")
+
+
 @api_router.get("/appstore-screenshots.zip")
 async def appstore_screenshots_zip():
     """One-off download of the generated App Store screenshot sets (6.7\" + 6.5\")."""
