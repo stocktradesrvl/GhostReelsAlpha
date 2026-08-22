@@ -393,6 +393,8 @@ export default function ReelDetail() {
               ? "You're out of AI credits. Top up your Universal Key (Profile → Manage plan → Universal Key → Add Balance), then tap Try again."
               : reel?.error_code === "storage"
               ? "Couldn't save your video to cloud storage just now. Please tap Try again in a moment."
+              : reel?.error_code === "key"
+              ? "Your API key was rejected. Check the key in Settings → AI keys, or clear it to use built-in credits."
               : (reel?.error || "Something went wrong while rendering.")}
           </Text>
           <PrimaryButton testID="retry-button" label="Try again" icon="refresh" onPress={retry} style={{ marginTop: spacing.lg, alignSelf: "stretch" }} />

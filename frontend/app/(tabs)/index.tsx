@@ -12,6 +12,8 @@ import { playPreview, stopPreview } from "@/src/audioPreview";
 import OptionSheet, { SheetOption } from "@/src/components/OptionSheet";
 import OutroSheet from "@/src/components/OutroSheet";
 import PresetSheet from "@/src/components/PresetSheet";
+import { loadDefaults } from "@/src/defaults";
+import { useHidingTabBar } from "@/src/tabbar";
 import PrimaryButton from "@/src/components/PrimaryButton";
 import Segmented from "@/src/components/Segmented";
 import { haptic } from "@/src/haptics";
@@ -61,6 +63,20 @@ export default function CreateScreen() {
   const musicSheet = useRef<BottomSheetModal>(null);
   const presetSheet = useRef<BottomSheetModal>(null);
   const outroSheet = useRef<BottomSheetModal>(null);
+  const scrollHide = useHidingTabBar();
+
+  // Load studio defaults (set in Settings) to prefill new reels — skipped when duplicating.
+  useEffect(() => {
+    if (params.dup) return;
+    loadDefaults().then((d) => {
+      if (d.voice_id) setVoiceId(d.voice_id);
+      if (d.seconds != null) setSeconds(d.seconds);
+      if (d.caption_style) setCaptionStyle(d.caption_style);
+      if (d.music_id) setMusicId(d.music_id);
+      if (d.watermark != null) setWatermark(d.watermark);
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const currentSettings = {
     seconds, visual_mode: visualMode, image_style: imageStyle, voice_id: voiceId, voice_speed: voiceSpeed, caption_style: captionStyle,
@@ -253,15 +269,21 @@ export default function CreateScreen() {
             <Ionicons name="layers-outline" size={16} color={colors.onSurface} />
             <Text style={styles.batchTxt}>Batch</Text>
           </Pressable>
-          <View style={styles.logo}>
-            <Ionicons name="flash" size={20} color={colors.brand} />
-          </View>
+          <Pressable
+            testID="settings-button"
+            onPress={() => { haptic.select(); router.push("/settings"); }}
+            style={styles.logo}
+          >
+            <Ionicons name="settings-outline" size={20} color={colors.brand} />
+          </Pressable>
         </View>
       </View>
 
       <KeyboardAwareScrollView
         bottomOffset={90}
-        contentContainerStyle={{ padding: spacing.lg, paddingBottom: 140 }}
+        onScroll={scrollHide.onScroll}
+        scrollEventThrottle={scrollHide.scrollEventThrottle}
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: 180 }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >

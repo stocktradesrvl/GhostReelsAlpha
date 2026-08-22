@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 9 (Settings + Tab-Bar Auto-Hide, FRONTEND-ONLY) — full pass @ 390x844 against EXPO_PUBLIC_BACKEND_URL with REELS_MOCK=1. All 6 requested flows verified: (1) GEAR NAV — gear icon (testID=settings-button) is present in every main tab header (Create/Series/Library) and tapping it navigates to /settings with openai-key-input visible on all three. (2) BYOK — typing 'sk-test-123456789' into openai-key-input and tapping save-keys-button flipped the OpenAI status pill to 'Yours · sk-••••6789'. Tapping clear-openai raised the in-app Remove/Cancel confirm; tapping Remove returned the pill to 'Built-in credits'. Backend PATCH /api/settings roundtripped correctly. (3) STUDIO DEFAULTS PERSIST — tapping default-dur-15 and default-cap-mono, then navigating to Create tab and back into Settings, both chips remained highlighted (computed border=rgb(239,68,68) brand-red on 15/mono, default border on 30/signal). AsyncStorage persistence via /app/frontend/src/defaults.ts confirmed. (4) BRAND KIT — typed '@tester' into brand-handle-input, tapped save-brand-button → settings-toast rendered visible with text 'Brand saved ✓'. Tapping manage-outros-button opened the outro bottom sheet with both 'No outro' and 'Upload outro clip' rows visible. (5) TAB-BAR AUTO-HIDE — measured the reanimated wrapper transform on Library FlatList. Before scroll: matrix(1,0,0,1,0,0). After wheel-scrolling down 6x on the reels-grid: matrix(1,0,0,1,0,140) → translateY=140px hides the bar off-screen. After wheel-scroll-up: matrix(1,0,0,1,0,0) → bar restored. Auto-hide works on web preview. (6) REGRESSION — Create/Series/Library nav intact; opening reel-card-7ee2e210 navigated to /reel/{id} and rendered 'Desert survival' with Download MP4 / Duplicate & edit / Edit narration / Create another reel controls. No red-screen. Only pre-existing warnings observed (expo-notifications web push token, props.pointerEvents deprecation).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "props.pointerEvents", "issue": "Pre-existing React 19 warning `props.pointerEvents is deprecated. Use style.pointerEvents`. Not introduced this iteration."},
+      {"component": "expo-notifications (web)", "issue": "Pre-existing warning `[expo-notifications] Listening to push token changes is not yet fully supported on web` — web-preview limitation."}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "settings.tsx:158-208 BYOK flow is clean — masked key comes from backend (openai_key_masked), pill toggles on settings.openai_key_set. Clear flow uses Alert.alert with destructive confirm and PATCHes empty string, then updates local state. Solid.",
+    "settings.tsx:216-235 Studio defaults chips call persistDefaults() which optimistically updates local state and awaits saveDefaults() (AsyncStorage) — the useEffect on mount rehydrates from storage, so persistence across nav-back is guaranteed. Verified in DOM.",
+    "settings.tsx:252 save-brand-button calls api.updateSettings({brand_handle}) AND mirrors the value into defaults.watermark via saveDefaults() — sensible behaviour so a saved @handle auto-fills the Create screen watermark field.",
+    "(tabs)/_layout.tsx:9-14 TabBarVisibilityProvider correctly wraps the Tabs so the same shared value drives HidingTabBar AND the useHidingTabBar() hook consumed by index/series/library scroll views. Clean architecture.",
+    "tabbar.tsx:11-14 translate.value uses withTiming — 200ms hide / 180ms show. On web the reanimated transform is applied via matrix(1,0,0,1,0,140) which is exactly the expected hide translateY. Verified.",
+    "tabbar.tsx:20-27 useHidingTabBar computes dy from lastY and gates on |dy|>6, plus a hard show at y<=4 — this feels correct and avoids jitter for tiny scroll deltas.",
+    "index.tsx:66,284 and series.tsx:19,85 and library.tsx:24,90 all wire scrollHide.onScroll + scrollEventThrottle onto their scroll containers — no tab misses the hook. Verified.",
+    "settings-button testID is duplicated across the three tab headers because Expo Router keeps sibling tabs mounted. Not a bug (only one is visible at a time), but automated tests using CSS `[data-testid=settings-button]` need to pick the visible node. Consider unique per-tab testIDs (e.g. settings-button-library) in a future iteration for easier automation."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only run)", "frontend": "100% (6/6 flows: gear-nav ×3 tabs, BYOK save+clear, studio-defaults persist, brand-kit + toast + outro-sheet, tab-bar auto-hide on scroll down/up, regression open-reel)"},
+  "seed_data_creation": "None. Existing library reels reused. BYOK fake key was saved and then cleared before finishing.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Settings feature + tab-bar auto-hide are fully functional under REELS_MOCK=1. Confirmed testIDs: settings-button (present in all 3 tab headers), settings-back, openai-key-input, google-key-input, save-keys-button, clear-openai, clear-google, default-dur-{15,30,60}, default-cap-{signal,mono,sunset,mint}, brand-handle-input, save-brand-button, manage-outros-button, settings-toast, tab-create/tab-series/tab-library are set via tabBarTestID but React Navigation on web does NOT surface these as [data-testid] attrs on the DOM buttons — use get_by_text('Create'|'Series'|'Library') or the visible settings-button in the header instead. Tab-bar hide translateY=140 (down) → 0 (up) confirmed via computed transform matrix on the reanimated wrapper. Alert.alert on web renders as an in-app modal with real Cancel/Remove buttons (NOT a native dialog) — testing agents should click 'Remove' via get_by_role('button', name='Remove') rather than page.dialog handlers.",
+  "rca_of_issue": "N/A — feature works as designed."
+}

@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, Series } from "@/src/api";
 import PrimaryButton from "@/src/components/PrimaryButton";
 import { haptic } from "@/src/haptics";
+import { useHidingTabBar } from "@/src/tabbar";
 import { colors, font, radius, spacing } from "@/src/theme";
 
 export default function SeriesScreen() {
@@ -15,6 +16,7 @@ export default function SeriesScreen() {
   const [series, setSeries] = useState<Series[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const scrollHide = useHidingTabBar();
 
   const load = useCallback(async () => {
     try {
@@ -38,14 +40,23 @@ export default function SeriesScreen() {
           <Text style={styles.title}>SERIES</Text>
           <Text style={styles.sub}>Recurring characters · continuing story</Text>
         </View>
-        <Pressable
-          testID="new-series-button"
-          onPress={() => { haptic.select(); router.push("/series/new"); }}
-          style={styles.newBtn}
-        >
-          <Ionicons name="add" size={18} color={colors.onBrand} />
-          <Text style={styles.newTxt}>New</Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            testID="settings-button"
+            onPress={() => { haptic.select(); router.push("/settings"); }}
+            style={styles.gearBtn}
+          >
+            <Ionicons name="settings-outline" size={20} color={colors.onSurface} />
+          </Pressable>
+          <Pressable
+            testID="new-series-button"
+            onPress={() => { haptic.select(); router.push("/series/new"); }}
+            style={styles.newBtn}
+          >
+            <Ionicons name="add" size={18} color={colors.onBrand} />
+            <Text style={styles.newTxt}>New</Text>
+          </Pressable>
+        </View>
       </View>
 
       {empty ? (
@@ -71,7 +82,9 @@ export default function SeriesScreen() {
           testID="series-list"
           data={series}
           keyExtractor={(s) => s.id}
-          contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + spacing.xl, gap: spacing.md }}
+          onScroll={scrollHide.onScroll}
+          scrollEventThrottle={scrollHide.scrollEventThrottle}
+          contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 96, gap: spacing.md }}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.brand} />
@@ -124,6 +137,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brandPrimary,
   },
   newTxt: { fontFamily: font.bodyBold, fontSize: 14, color: colors.onBrand },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  gearBtn: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl },
   emptyIcon: {
     width: 72, height: 72, borderRadius: 36, backgroundColor: colors.brandTertiary,

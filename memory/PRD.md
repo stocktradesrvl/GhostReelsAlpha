@@ -125,6 +125,13 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
   **Edit narration** → `app/lines/[id].tsx` (per-line text + "Re-record this line", live polling). Verified: backend
   line-regen→recompose end-to-end (mock, gradient) + narration editor UI renders. Live verify still blocked by budget cap.
 
+- **Follow-up (2026-08 · batch 11 · forked): Settings page + BYOK + auto-hiding tab bar.**
+  - **Settings** (`app/settings.tsx`, gear icon `testID settings-button` in Create/Series/Library headers, route in root stack): AI Keys (BYOK), Studio Defaults, Brand Kit, Saved Presets, About/credits.
+  - **Bring-Your-Own-Key**: `app_settings` Mongo doc (`id="global"`) stores `openai_key`,`google_key`,`brand_handle`. `GET/PUT /api/settings` (GET masked only). Keys → `pipeline.set_user_keys()` at startup + on PUT. `pipeline.USER_KEYS` global; helpers `_chat_text` (OpenAI `gpt-4o-mini` when user key set else Emergent `gpt-5.4`), `_tts_bytes` (`tts-1`), whisper (`whisper-1`), images via `google-genai` `gemini-2.5-flash-image` (9:16) when Google key set — all fall back to Emergent key otherwise. `classify_error` maps auth/401/403 → `key`, 429 → `budget`; reel-detail handles `key`. Verified: invalid user key → friendly `error_code=key` (no Emergent credits spent).
+  - **Studio Defaults** (`src/defaults.ts`, AsyncStorage): default voice/music/length/caption style prefill new reels (Create loads on mount; skipped when duplicating).
+  - **Auto-hiding tab bar** (`src/tabbar.tsx`): `TabBarVisibilityProvider` + custom `HidingTabBar` (absolute, reanimated translateY) + `useHidingTabBar()` onScroll wired into Create/Series/Library. Slides away on scroll-down, returns on scroll-up (extra ~96 bottom padding added).
+  - Verified via testing agent iteration 9: 6/6 frontend flows pass, no bugs.
+
 ## Backlog
 - P1: multiple caption layout presets; background music track option; ElevenLabs voice option.
 - P2: multi-aspect export (Reels/Shorts variants); onboarding; brand kit (logo watermark).

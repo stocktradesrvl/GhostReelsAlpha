@@ -10,9 +10,12 @@ from pathlib import Path
 
 import emoji
 import imageio_ffmpeg
+import openai
 from dotenv import load_dotenv
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 from emergentintegrations.llm.openai import OpenAISpeechToText, OpenAITextToSpeech
+from google import genai as google_genai
+from google.genai import types as genai_types
 
 from reels_config import (
     BG_MAP,
@@ -31,6 +34,45 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
+
+# Bring-Your-Own-Key: when the app owner saves their own provider keys in Settings,
+# generation uses THOSE keys (real OpenAI / Google) instead of the shared Emergent key,
+# lifting the shared budget cap. Updated by the backend from the app_settings doc.
+USER_KEYS = {"openai": "", "google": ""}
+
+
+def set_user_keys(openai_key: str = "", google_key: str = "") -> None:
+    USER_KEYS["openai"] = (openai_key or "").strip()
+    USER_KEYS["google"] = (google_key or "").strip()
+
+
+async def _chat_text(session_id: str, system: str, prompt: str) -> str:
+    """Text generation via the user's own OpenAI key when set, else the Emergent key."""
+    if USER_KEYS["openai"]:
+        client = openai.AsyncOpenAI(api_key=USER_KEYS["openai"])
+        resp = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": prompt}],
+        )
+        return resp.choices[0].message.content or ""
+    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=session_id,
+                   system_message=system).with_model("openai", "gpt-5.4")
+    return await chat.send_message(UserMessage(text=prompt))
+
+
+async def _tts_bytes(text: str, voice_openai: str, speed: float) -> bytes:
+    """TTS via the user's OpenAI key when set, else the Emergent key."""
+    text = re.sub(r"\s+", " ", text).strip()[:4000]
+    spd = max(0.5, min(1.5, float(speed)))
+    if USER_KEYS["openai"]:
+        client = openai.AsyncOpenAI(api_key=USER_KEYS["openai"])
+        resp = await client.audio.speech.create(
+            model="tts-1", voice=voice_openai, input=text, response_format="mp3", speed=spd)
+        return resp.content
+    tts = OpenAITextToSpeech(api_key=EMERGENT_LLM_KEY)
+    return await tts.generate_speech(text=text, model="tts-1-hd", voice=voice_openai,
+                                     speed=spd, response_format="mp3")
 FONTS_DIR = str(ROOT_DIR / "assets" / "fonts")
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
@@ -71,14 +113,10 @@ async def generate_script(topic: str, seconds: int = 30) -> str:
     target_words = int(seconds * WORDS_PER_SEC)
     if MOCK:
         return _clean_script(f"{topic}. {_MOCK_SCRIPT}")
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"script-{abs(hash(topic)) % 100000}",
-        system_message=(
-            "You are an elite short-form video scriptwriter for TikTok, Reels and Shorts. "
-            "You write punchy, spoken-word narration that hooks in the first 3 seconds."
-        ),
-    ).with_model("openai", "gpt-5.4")
+    chat_system = (
+        "You are an elite short-form video scriptwriter for TikTok, Reels and Shorts. "
+        "You write punchy, spoken-word narration that hooks in the first 3 seconds."
+    )
 
     prompt = (
         f"Write a faceless video narration script about: \"{topic}\".\n\n"
@@ -91,7 +129,7 @@ async def generate_script(topic: str, seconds: int = 30) -> str:
         f"- End with a memorable closing line.\n\n"
         f"Return only the narration text."
     )
-    text = await chat.send_message(UserMessage(text=prompt))
+    text = await _chat_text(f"script-{abs(hash(topic)) % 100000}", chat_system, prompt)
     return _clean_script(text)
 
 
@@ -139,11 +177,6 @@ async def suggest_characters(premise: str, tone: str = "", count: int = 3) -> li
             {"name": f"Character {i + 1}", "description": "A vivid recurring figure central to the story."}
             for i in range(n)
         ]
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"chars-{abs(hash(premise)) % 100000}",
-        system_message="You design memorable, visually distinct recurring characters for a video series.",
-    ).with_model("openai", "gpt-5.4")
     ask = (
         f"For a short-form video SERIES with this premise: \"{premise}\"\n"
         f"Tone: {tone or 'engaging'}.\n\n"
@@ -152,7 +185,11 @@ async def suggest_characters(premise: str, tone: str = "", count: int = 3) -> li
         f"generator can draw them identically every episode.\n\n"
         f"Return ONLY a JSON array of objects with keys \"name\" and \"description\"."
     )
-    raw = await chat.send_message(UserMessage(text=ask))
+    raw = await _chat_text(
+        f"chars-{abs(hash(premise)) % 100000}",
+        "You design memorable, visually distinct recurring characters for a video series.",
+        ask,
+    )
     out = []
     try:
         m = re.search(r"\[.*\]", raw, re.DOTALL)
@@ -184,14 +221,10 @@ async def generate_series_script(series: dict, prior_scripts: list, topic, secon
     else:
         direction = "Continue the storyline naturally from where the previous episode ended, advancing the plot."
 
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"series-{series.get('id','x')}-{episode_no}",
-        system_message=(
-            "You are an elite serialized short-form video scriptwriter. You keep characters, "
-            "tone and story continuity perfectly consistent across episodes."
-        ),
-    ).with_model("openai", "gpt-5.4")
+    chat_system = (
+        "You are an elite serialized short-form video scriptwriter. You keep characters, "
+        "tone and story continuity perfectly consistent across episodes."
+    )
     prompt = (
         f"Write episode {episode_no} of a faceless narrated video series.\n\n"
         f"SERIES PREMISE: {series.get('premise','')}\n"
@@ -209,7 +242,7 @@ async def generate_series_script(series: dict, prior_scripts: list, topic, secon
         f"- End on a cliffhanger or hook that sets up the next episode.\n\n"
         f"Return only the narration text."
     )
-    text = await chat.send_message(UserMessage(text=prompt))
+    text = await _chat_text(f"series-{series.get('id','x')}-{episode_no}", chat_system, prompt)
     return _clean_script(text)
 
 
@@ -227,11 +260,7 @@ async def synth_voice(script: str, voice_id: str, out_path: str, speed: float = 
         Path(out_path + ".txt").write_text(script, encoding="utf-8")
         return
     voice = VOICE_MAP.get(voice_id, VOICE_MAP["onyx"])["openai"]
-    tts = OpenAITextToSpeech(api_key=EMERGENT_LLM_KEY)
-    text = re.sub(r"\s+", " ", script).strip()[:4000]
-    spd = max(0.5, min(1.5, float(speed)))
-    audio = await tts.generate_speech(text=text, model="tts-1-hd", voice=voice,
-                                      speed=spd, response_format="mp3")
+    audio = await _tts_bytes(script, voice, speed)
     with open(out_path, "wb") as f:
         f.write(audio)
 
@@ -287,9 +316,8 @@ async def concat_audio(paths: list, out_path: str, transcript: str = None) -> No
 
 async def synth_voice_sample(voice_id: str, out_path: str) -> None:
     v = VOICE_MAP.get(voice_id, VOICE_MAP["onyx"])
-    tts = OpenAITextToSpeech(api_key=EMERGENT_LLM_KEY)
     phrase = f"Hi, I'm {v['name']}. Here's how I'll sound narrating your reels."
-    audio = await tts.generate_speech(text=phrase, model="tts-1", voice=v["openai"], response_format="mp3")
+    audio = await _tts_bytes(phrase, v["openai"], 1.0)
     with open(out_path, "wb") as f:
         f.write(audio)
 
@@ -310,6 +338,14 @@ async def transcribe_words(audio_path: str):
             end = round((i + 1) * step - 0.02, 2)
             words.append({"word": tok, "start": start, "end": max(start + 0.05, end)})
         return words, duration
+    if USER_KEYS["openai"]:
+        client = openai.AsyncOpenAI(api_key=USER_KEYS["openai"])
+        with open(audio_path, "rb") as fh:
+            result = await client.audio.transcriptions.create(
+                model="whisper-1", file=fh,
+                response_format="verbose_json", timestamp_granularities=["word"],
+            )
+        return _parse_words(result)
     stt = OpenAISpeechToText(api_key=EMERGENT_LLM_KEY)
     with open(audio_path, "rb") as fh:
         result = await stt.transcribe(
@@ -633,11 +669,6 @@ def scene_count(seconds: int) -> int:
 async def generate_scene_prompts(script: str, n: int, character_bible: str = "") -> list:
     if MOCK:
         return [f"Mock cinematic vertical scene {i + 1} for the story" for i in range(n)]
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"prompts-{abs(hash(script)) % 100000}",
-        system_message="You turn video scripts into vivid cinematic image prompts.",
-    ).with_model("openai", "gpt-5.4")
     char_note = (
         f"\n\nRecurring characters that MUST appear consistently (same face, hair, clothing "
         f"and style) whenever they are relevant to a beat:\n{character_bible}\n"
@@ -653,7 +684,11 @@ async def generate_scene_prompts(script: str, n: int, character_bible: str = "")
         f"Narration:\n{script}\n\n"
         f"Return ONLY a JSON array of {n} strings."
     )
-    raw = await chat.send_message(UserMessage(text=ask))
+    raw = await _chat_text(
+        f"prompts-{abs(hash(script)) % 100000}",
+        "You turn video scripts into vivid cinematic image prompts.",
+        ask,
+    )
     prompts = []
     try:
         m = re.search(r"\[.*\]", raw, re.DOTALL)
@@ -681,22 +716,42 @@ async def generate_images(prompts: list, workdir: str, style_suffix: str = "",
             paths.append(out)
         return paths
     for i, prompt in enumerate(prompts):
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"img-{i}-{abs(hash(prompt)) % 100000}",
-            system_message="You are an image generation assistant.",
-        ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
         style = f" {style_suffix}." if style_suffix else ""
         style += " Vertical 9:16 aspect ratio, ultra-detailed, no text."
         if character_bible:
             style += (f" Keep recurring characters visually identical across images "
                       f"(same face, hair, outfit): {character_bible}.")
-        _text, images = await chat.send_message_multimodal_response(UserMessage(text=prompt + style))
-        if not images:
-            raise RuntimeError("Image generation returned no image")
         out = os.path.join(workdir, f"scene_{i}.png")
-        with open(out, "wb") as f:
-            f.write(base64.b64decode(images[0]["data"]))
+        if USER_KEYS["google"]:
+            client = google_genai.Client(api_key=USER_KEYS["google"])
+            resp = await client.aio.models.generate_content(
+                model="gemini-2.5-flash-image",
+                contents=prompt + style,
+                config=genai_types.GenerateContentConfig(
+                    response_modalities=["TEXT", "IMAGE"],
+                    image_config={"aspect_ratio": "9:16"},
+                ),
+            )
+            img_bytes = None
+            for part in resp.candidates[0].content.parts:
+                if getattr(part, "inline_data", None) and part.inline_data.data:
+                    img_bytes = part.inline_data.data
+                    break
+            if not img_bytes:
+                raise RuntimeError("Image generation returned no image")
+            with open(out, "wb") as f:
+                f.write(img_bytes)
+        else:
+            chat = LlmChat(
+                api_key=EMERGENT_LLM_KEY,
+                session_id=f"img-{i}-{abs(hash(prompt)) % 100000}",
+                system_message="You are an image generation assistant.",
+            ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
+            _text, images = await chat.send_message_multimodal_response(UserMessage(text=prompt + style))
+            if not images:
+                raise RuntimeError("Image generation returned no image")
+            with open(out, "wb") as f:
+                f.write(base64.b64decode(images[0]["data"]))
         paths.append(out)
     return paths
 

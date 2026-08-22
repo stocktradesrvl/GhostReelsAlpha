@@ -1,0 +1,343 @@
+import { BottomSheetModal } from "@gorhom/bottom-sheet";
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { api, AppSettings, Config } from "@/src/api";
+import OptionSheet, { SheetOption } from "@/src/components/OptionSheet";
+import OutroSheet from "@/src/components/OutroSheet";
+import PrimaryButton from "@/src/components/PrimaryButton";
+import { loadDefaults, saveDefaults, StudioDefaults } from "@/src/defaults";
+import { haptic } from "@/src/haptics";
+import { loadPresets, Preset, savePresets } from "@/src/presets";
+import { colors, font, radius, spacing } from "@/src/theme";
+
+const DURATIONS = [15, 30, 60];
+
+export default function SettingsScreen() {
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+
+  const [config, setConfig] = useState<Config | null>(null);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [googleKey, setGoogleKey] = useState("");
+  const [savingKeys, setSavingKeys] = useState(false);
+
+  const [defaults, setDefaults] = useState<StudioDefaults>({});
+  const [brandHandle, setBrandHandle] = useState("");
+  const [savingBrand, setSavingBrand] = useState(false);
+  const [savingDefaults, setSavingDefaults] = useState(false);
+  const [presets, setPresets] = useState<Preset[]>([]);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const voiceSheet = useRef<BottomSheetModal>(null);
+  const musicSheet = useRef<BottomSheetModal>(null);
+  const outroSheet = useRef<BottomSheetModal>(null);
+
+  useEffect(() => {
+    api.getConfig().then(setConfig).catch(() => {});
+    api.getSettings().then((s) => { setSettings(s); setBrandHandle(s.brand_handle || ""); }).catch(() => {});
+    loadDefaults().then((d) => setDefaults(d)).catch(() => {});
+    loadPresets().then(setPresets).catch(() => {});
+  }, []);
+
+  const flash = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(null), 2200); }, []);
+
+  const voice = config?.voices.find((v) => v.id === (defaults.voice_id || "onyx"));
+  const music = config?.music_tracks.find((m) => m.id === (defaults.music_id || "none"));
+  const voiceOptions: SheetOption[] = config?.voices.map((v) => ({ id: v.id, title: v.name, subtitle: v.tagline })) || [];
+  const musicOptions: SheetOption[] = config?.music_tracks.map((m) => ({ id: m.id, title: m.name })) || [];
+
+  const saveKeys = useCallback(async () => {
+    setSavingKeys(true);
+    try {
+      const payload: any = {};
+      if (openaiKey.trim()) payload.openai_key = openaiKey.trim();
+      if (googleKey.trim()) payload.google_key = googleKey.trim();
+      const s = await api.updateSettings(payload);
+      setSettings(s);
+      setOpenaiKey(""); setGoogleKey("");
+      haptic.success();
+      flash("Keys saved ✓");
+    } catch (e: any) {
+      haptic.error();
+      flash(e.message || "Couldn't save keys");
+    } finally {
+      setSavingKeys(false);
+    }
+  }, [openaiKey, googleKey, flash]);
+
+  const clearKey = useCallback((which: "openai" | "google") => {
+    Alert.alert("Remove key?", `The app will use built-in credits for ${which === "openai" ? "text & voice" : "AI images"}.`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove", style: "destructive", onPress: async () => {
+          const payload = which === "openai" ? { openai_key: "" } : { google_key: "" };
+          const s = await api.updateSettings(payload);
+          setSettings(s); haptic.medium(); flash("Key removed");
+        },
+      },
+    ]);
+  }, [flash]);
+
+  const persistDefaults = useCallback(async (next: StudioDefaults) => {
+    setDefaults(next);
+    setSavingDefaults(true);
+    await saveDefaults(next);
+    setSavingDefaults(false);
+    haptic.light();
+  }, []);
+
+  const saveBrand = useCallback(async () => {
+    setSavingBrand(true);
+    try {
+      await api.updateSettings({ brand_handle: brandHandle.trim() });
+      const next = { ...defaults, watermark: brandHandle.trim() };
+      await saveDefaults(next); setDefaults(next);
+      haptic.success(); flash("Brand saved ✓");
+    } catch (e: any) {
+      haptic.error(); flash(e.message || "Couldn't save");
+    } finally {
+      setSavingBrand(false);
+    }
+  }, [brandHandle, defaults, flash]);
+
+  const removePreset = useCallback((name: string) => {
+    Alert.alert("Delete preset?", name, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete", style: "destructive", onPress: async () => {
+          const next = presets.filter((p) => p.name !== name);
+          setPresets(next); await savePresets(next); haptic.medium();
+        },
+      },
+    ]);
+  }, [presets]);
+
+  const Section = ({ label, hint }: { label: string; hint?: string }) => (
+    <View style={{ marginTop: spacing.xl }}>
+      <Text style={styles.section}>{label}</Text>
+      {!!hint && <Text style={styles.hint}>{hint}</Text>}
+    </View>
+  );
+
+  return (
+    <View style={styles.root}>
+      <View style={[styles.header, { paddingTop: insets.top + spacing.xs }]}>
+        <Pressable testID="settings-back" onPress={() => router.back()} style={styles.iconBtn}>
+          <Ionicons name="chevron-back" size={22} color={colors.onSurface} />
+        </Pressable>
+        <Text style={styles.headerTitle}>Settings</Text>
+        <View style={styles.iconBtn} />
+      </View>
+
+      <KeyboardAwareScrollView
+        bottomOffset={90}
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + spacing.xxxl }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* ---- AI KEYS ---- */}
+        <Section label="AI KEYS · BRING YOUR OWN" hint="Use your own API keys to skip the shared credit limit. Leave blank to keep using built-in credits." />
+
+        <View style={styles.keyRow}>
+          <Text style={styles.keyLabel}>OpenAI key</Text>
+          <View style={[styles.statusPill, settings?.openai_key_set ? styles.pillOn : styles.pillOff]}>
+            <Text style={[styles.pillTxt, settings?.openai_key_set ? styles.pillTxtOn : styles.pillTxtOff]}>
+              {settings?.openai_key_set ? `Yours · ${settings.openai_key_masked}` : "Built-in credits"}
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.keyHint}>Powers script writing, voiceover and captions.</Text>
+        <View style={styles.inputRow}>
+          <TextInput
+            testID="openai-key-input"
+            value={openaiKey}
+            onChangeText={setOpenaiKey}
+            placeholder="sk-..."
+            placeholderTextColor={colors.onSurfaceSecondary}
+            autoCapitalize="none"
+            secureTextEntry
+            style={styles.input}
+          />
+          {settings?.openai_key_set && (
+            <Pressable testID="clear-openai" onPress={() => clearKey("openai")} style={styles.clearBtn}>
+              <Ionicons name="trash-outline" size={16} color={colors.onSurfaceSecondary} />
+            </Pressable>
+          )}
+        </View>
+
+        <View style={[styles.keyRow, { marginTop: spacing.lg }]}>
+          <Text style={styles.keyLabel}>Google / Gemini key</Text>
+          <View style={[styles.statusPill, settings?.google_key_set ? styles.pillOn : styles.pillOff]}>
+            <Text style={[styles.pillTxt, settings?.google_key_set ? styles.pillTxtOn : styles.pillTxtOff]}>
+              {settings?.google_key_set ? `Yours · ${settings.google_key_masked}` : "Built-in credits"}
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.keyHint}>Powers AI image visuals (Nano Banana).</Text>
+        <View style={styles.inputRow}>
+          <TextInput
+            testID="google-key-input"
+            value={googleKey}
+            onChangeText={setGoogleKey}
+            placeholder="AIza..."
+            placeholderTextColor={colors.onSurfaceSecondary}
+            autoCapitalize="none"
+            secureTextEntry
+            style={styles.input}
+          />
+          {settings?.google_key_set && (
+            <Pressable testID="clear-google" onPress={() => clearKey("google")} style={styles.clearBtn}>
+              <Ionicons name="trash-outline" size={16} color={colors.onSurfaceSecondary} />
+            </Pressable>
+          )}
+        </View>
+        <PrimaryButton
+          testID="save-keys-button"
+          label="Save keys"
+          icon="key-outline"
+          loading={savingKeys}
+          disabled={!openaiKey.trim() && !googleKey.trim()}
+          onPress={saveKeys}
+          style={{ marginTop: spacing.md }}
+        />
+
+        {/* ---- STUDIO DEFAULTS ---- */}
+        <Section label="STUDIO DEFAULTS" hint="Prefill every new reel with your favourite settings." />
+        <SettingRow icon="mic" label="Voice" value={voice?.name || "—"} onPress={() => voiceSheet.current?.present()} />
+        <SettingRow icon="musical-notes" label="Music" value={music?.name || "None"} onPress={() => musicSheet.current?.present()} />
+        <Text style={styles.miniLabel}>Length</Text>
+        <View style={styles.chipRow}>
+          {DURATIONS.map((d) => {
+            const active = (defaults.seconds || 30) === d;
+            return (
+              <Pressable key={d} testID={`default-dur-${d}`} onPress={() => persistDefaults({ ...defaults, seconds: d })} style={[styles.chip, active && styles.chipActive]}>
+                <Text style={[styles.chipTxt, active && styles.chipTxtActive]}>{d}s</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={styles.miniLabel}>Caption style</Text>
+        <View style={styles.chipRow}>
+          {(config?.caption_styles || []).map((c) => {
+            const active = (defaults.caption_style || "signal") === c.id;
+            return (
+              <Pressable key={c.id} testID={`default-cap-${c.id}`} onPress={() => persistDefaults({ ...defaults, caption_style: c.id })} style={[styles.chip, active && styles.chipActive]}>
+                <Text style={[styles.chipTxt, active && styles.chipTxtActive]}>{c.name}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        {savingDefaults && <Text style={styles.savingTxt}>Saved</Text>}
+
+        {/* ---- BRAND KIT ---- */}
+        <Section label="BRAND KIT" hint="Your @handle burns onto every reel as a watermark by default." />
+        <View style={styles.inputRow}>
+          <TextInput
+            testID="brand-handle-input"
+            value={brandHandle}
+            onChangeText={setBrandHandle}
+            placeholder="@yourhandle"
+            placeholderTextColor={colors.onSurfaceSecondary}
+            autoCapitalize="none"
+            maxLength={40}
+            style={styles.input}
+          />
+        </View>
+        <PrimaryButton testID="save-brand-button" variant="ghost" label="Save brand" icon="pricetag-outline" loading={savingBrand} onPress={saveBrand} style={{ marginTop: spacing.sm }} />
+        <PrimaryButton testID="manage-outros-button" variant="ghost" label="Manage outro clips" icon="film-outline" onPress={() => outroSheet.current?.present()} style={{ marginTop: spacing.sm }} />
+
+        {/* ---- PRESETS ---- */}
+        <Section label="SAVED PRESETS" hint={presets.length ? undefined : "Save presets from the Create screen to reuse setups."} />
+        {presets.map((p) => (
+          <View key={p.name} style={styles.presetRow} testID={`preset-${p.name}`}>
+            <Ionicons name="bookmark-outline" size={18} color={colors.brand} />
+            <Text style={styles.presetName} numberOfLines={1}>{p.name}</Text>
+            <Pressable testID={`preset-delete-${p.name}`} onPress={() => removePreset(p.name)} style={styles.clearBtn}>
+              <Ionicons name="trash-outline" size={16} color={colors.onSurfaceSecondary} />
+            </Pressable>
+          </View>
+        ))}
+
+        {/* ---- ABOUT ---- */}
+        <Section label="AI CREDITS & ABOUT" />
+        <View style={styles.aboutCard}>
+          <Text style={styles.aboutText}>
+            Faceless AI Reels turns any topic into a TikTok-ready vertical video.{"\n\n"}
+            Running low on built-in credits? Either paste your own API keys above, or top up the shared Universal Key:
+            Profile → Manage plan → Universal Key → Add Balance.
+          </Text>
+          <Text style={styles.version}>v1.0</Text>
+        </View>
+
+        {!!toast && (
+          <View style={styles.toast} testID="settings-toast"><Text style={styles.toastTxt}>{toast}</Text></View>
+        )}
+      </KeyboardAwareScrollView>
+
+      <OptionSheet ref={voiceSheet} title="Default voice" options={voiceOptions} selectedId={defaults.voice_id || "onyx"} onSelect={(id) => { persistDefaults({ ...defaults, voice_id: id }); voiceSheet.current?.dismiss(); }} />
+      <OptionSheet ref={musicSheet} title="Default music" options={musicOptions} selectedId={defaults.music_id || "none"} onSelect={(id) => { persistDefaults({ ...defaults, music_id: id }); musicSheet.current?.dismiss(); }} />
+      <OutroSheet ref={outroSheet} selectedId={null} onSelect={() => outroSheet.current?.dismiss()} />
+    </View>
+  );
+}
+
+function SettingRow({ icon, label, value, onPress }: { icon: any; label: string; value: string; onPress: () => void }) {
+  return (
+    <Pressable onPress={() => { haptic.select(); onPress(); }} style={styles.settingRow} testID={`default-row-${label}`}>
+      <View style={styles.settingLeft}>
+        <Ionicons name={icon} size={18} color={colors.onSurfaceSecondary} />
+        <Text style={styles.settingLabel}>{label}</Text>
+      </View>
+      <View style={styles.settingRight}>
+        <Text style={styles.settingValue}>{value}</Text>
+        <Ionicons name="chevron-forward" size={16} color={colors.onSurfaceSecondary} />
+      </View>
+    </Pressable>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.surface },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.md, paddingBottom: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
+  iconBtn: { width: 40, height: 40, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
+  headerTitle: { flex: 1, textAlign: "center", fontFamily: font.display, fontSize: 22, color: colors.onSurface, letterSpacing: 0.5 },
+  section: { fontFamily: font.bodyBold, fontSize: 11, letterSpacing: 1.2, color: colors.brand },
+  hint: { fontFamily: font.body, fontSize: 12, color: colors.onSurfaceSecondary, marginTop: spacing.xs, lineHeight: 17 },
+  keyRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.md },
+  keyLabel: { fontFamily: font.bodyBold, fontSize: 15, color: colors.onSurface },
+  keyHint: { fontFamily: font.body, fontSize: 12, color: colors.onSurfaceSecondary, marginTop: 2 },
+  statusPill: { paddingHorizontal: spacing.sm, height: 24, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", maxWidth: "58%" },
+  pillOn: { backgroundColor: "rgba(34,197,94,0.14)" },
+  pillOff: { backgroundColor: colors.surfaceTertiary },
+  pillTxt: { fontFamily: font.bodySemi, fontSize: 11 },
+  pillTxtOn: { color: colors.success },
+  pillTxtOff: { color: colors.onSurfaceSecondary },
+  inputRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.sm },
+  input: { flex: 1, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.md, height: 48, fontFamily: font.body, fontSize: 15, color: colors.onSurface },
+  clearBtn: { width: 40, height: 40, borderRadius: radius.md, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceTertiary },
+  settingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.md, height: 54, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, marginTop: spacing.sm },
+  settingLeft: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  settingLabel: { fontFamily: font.bodySemi, fontSize: 15, color: colors.onSurface },
+  settingRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  settingValue: { fontFamily: font.bodyMed, fontSize: 14, color: colors.onSurfaceSecondary },
+  miniLabel: { fontFamily: font.bodyBold, fontSize: 11, letterSpacing: 1, color: colors.onSurfaceSecondary, marginTop: spacing.md, marginBottom: spacing.sm },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  chip: { minWidth: 64, flexGrow: 1, height: 42, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.sm },
+  chipActive: { borderColor: colors.brand, backgroundColor: colors.brandTertiary },
+  chipTxt: { fontFamily: font.bodySemi, fontSize: 13, color: colors.onSurfaceSecondary },
+  chipTxtActive: { color: colors.onBrandTertiary },
+  savingTxt: { fontFamily: font.bodyMed, fontSize: 11, color: colors.success, marginTop: spacing.sm },
+  presetRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, marginTop: spacing.sm },
+  presetName: { flex: 1, fontFamily: font.bodyBold, fontSize: 14, color: colors.onSurface },
+  aboutCard: { padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, marginTop: spacing.sm },
+  aboutText: { fontFamily: font.body, fontSize: 13, color: colors.onSurfaceSecondary, lineHeight: 19 },
+  version: { fontFamily: font.bodyMed, fontSize: 11, color: colors.onSurfaceSecondary, marginTop: spacing.sm },
+  toast: { marginTop: spacing.lg, alignSelf: "center", paddingHorizontal: spacing.lg, height: 40, borderRadius: radius.pill, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
+  toastTxt: { fontFamily: font.bodySemi, fontSize: 13, color: colors.onSurface },
+});

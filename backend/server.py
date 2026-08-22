@@ -66,7 +66,12 @@ def now_iso() -> str:
 def classify_error(exc) -> tuple:
     """Map raw pipeline exceptions to (error_code, friendly_message)."""
     msg = str(exc) or ""
-    if re.search(r"budget|exceeded|insufficient|quota|credit", msg, re.I):
+    if re.search(r"invalid[_ ]?api[_ ]?key|incorrect api key|api key not valid|authentication|unauthorized|permission denied|\b401\b|\b403\b", msg, re.I):
+        return "key", (
+            "Your API key was rejected. Check the OpenAI / Google key you saved in "
+            "Settings → AI keys (or clear it to use the built-in credits)."
+        )
+    if re.search(r"budget|exceeded|insufficient|quota|credit|rate limit|\b429\b", msg, re.I):
         return "budget", (
             "You're out of AI credits. Top up your Universal Key "
             "(Profile → Manage plan → Universal Key → Add Balance), then try again."
@@ -150,6 +155,15 @@ class SceneRegenRequest(BaseModel):
 
 class LineRegenRequest(BaseModel):
     text: str
+
+
+SETTINGS_ID = "global"
+
+
+class SettingsUpdate(BaseModel):
+    openai_key: Optional[str] = None   # None = unchanged; "" = clear
+    google_key: Optional[str] = None
+    brand_handle: Optional[str] = None
 
 
 PUBLIC_FIELDS = {
@@ -956,6 +970,41 @@ async def regenerate_line(reel_id: str, index: int, req: LineRegenRequest):
     return public_reel(await db.reels.find_one({"id": reel_id}))
 
 
+def _mask_key(k: str) -> str:
+    if not k:
+        return ""
+    return (k[:3] + "••••" + k[-4:]) if len(k) > 10 else "••••"
+
+
+@api_router.get("/settings")
+async def get_settings():
+    doc = await db.app_settings.find_one({"id": SETTINGS_ID}) or {}
+    return {
+        "openai_key_set": bool(doc.get("openai_key")),
+        "openai_key_masked": _mask_key(doc.get("openai_key", "")),
+        "google_key_set": bool(doc.get("google_key")),
+        "google_key_masked": _mask_key(doc.get("google_key", "")),
+        "brand_handle": doc.get("brand_handle") or "",
+    }
+
+
+@api_router.put("/settings")
+async def update_settings(req: SettingsUpdate):
+    doc = await db.app_settings.find_one({"id": SETTINGS_ID}) or {"id": SETTINGS_ID}
+    if req.openai_key is not None:
+        doc["openai_key"] = req.openai_key.strip()
+    if req.google_key is not None:
+        doc["google_key"] = req.google_key.strip()
+    if req.brand_handle is not None:
+        doc["brand_handle"] = req.brand_handle.strip()[:40]
+    doc["updated_at"] = now_iso()
+    await db.app_settings.update_one({"id": SETTINGS_ID}, {"$set": doc}, upsert=True)
+    pipeline.set_user_keys(doc.get("openai_key", ""), doc.get("google_key", ""))
+    logger.info("Settings updated (openai=%s, google=%s)",
+                bool(doc.get("openai_key")), bool(doc.get("google_key")))
+    return await get_settings()
+
+
 app.include_router(api_router)
 
 app.add_middleware(
@@ -992,6 +1041,13 @@ async def startup():
         logger.info("Object storage initialised")
     except Exception as e:  # noqa: BLE001
         logger.warning("Object storage init failed (will retry on demand): %s", e)
+    try:
+        doc = await db.app_settings.find_one({"id": SETTINGS_ID}) or {}
+        pipeline.set_user_keys(doc.get("openai_key", ""), doc.get("google_key", ""))
+        if doc.get("openai_key") or doc.get("google_key"):
+            logger.info("Loaded user BYOK keys from settings")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Settings load failed: %s", e)
     asyncio.create_task(scheduler_loop())
 
 

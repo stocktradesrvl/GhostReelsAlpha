@@ -74,6 +74,13 @@ export type Reel = {
 
 export type Character = { name: string; description: string };
 export type Outro = { id: string; name: string; size: number; created_at: string };
+export type AppSettings = {
+  openai_key_set: boolean;
+  openai_key_masked: string;
+  google_key_set: boolean;
+  google_key_masked: string;
+  brand_handle: string;
+};
 export type Series = {
   id: string;
   title: string;
@@ -146,6 +153,9 @@ export const api = {
       body: JSON.stringify({ prompt: prompt || null }),
     }),
   sceneImageUrl: (id: string, index: number) => `${BASE}/reels/${id}/scene/${index}/image`,
+  getSettings: () => req<AppSettings>("/settings"),
+  updateSettings: (payload: { openai_key?: string; google_key?: string; brand_handle?: string }) =>
+    req<AppSettings>("/settings", { method: "PUT", body: JSON.stringify(payload) }),
   getLines: (id: string) =>
     req<{ editable: boolean; status: string; lines: { index: number; text: string }[] }>(
       `/reels/${id}/lines`,
