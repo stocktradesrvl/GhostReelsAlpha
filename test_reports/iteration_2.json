@@ -1,0 +1,38 @@
+{
+  "summary": "Validated the four follow-up features on Faceless AI Reels (Background Music beds, Caption Presets — position/size, Brand Watermark, Voice Preview). Backend: added /app/backend/tests/test_reels_extras.py — 8/8 pytest cases passed in ~11s including /api/config exposing caption_positions {bottom,center,top}, caption_sizes {s,m,l} and music_tracks {none,lofi,upbeat,cinematic}; GET /api/voices/{onyx|nova}/preview returns 200 audio/mpeg with non-zero body; GET /api/voices/bogus/preview returns 404; POST /api/reels rejects invalid caption_position / caption_size / music_id with 400; and a full end-to-end reel {script, voice=nova, caption_style=sunset, caption_position=bottom, caption_size=l, bg=sunset, music=upbeat, watermark=@creator} reached status=ready in ~6s, echoed back all new fields on GET /api/reels/{id}, and GET /api/reels/{id}/video returned 200 video/mp4 (>10KB). Frontend (Expo web preview @ 390x844): Create screen scrolls to STUDIO SETTINGS and shows the new Music row (testID setting-music) which opens a sheet listing No music / Lo-Fi Chill / Upbeat / Cinematic; CAPTION POSITION chips (bottom/center/top) and CAPTION SIZE chips (s/m/l) toggle correctly (testIDs caption-position-<id>, caption-size-<id>); WATERMARK text input accepts and persists text (testID watermark-input); the Voice sheet shows a preview play button per voice with correct testID preview-<voiceId> for all 6 voices (onyx, nova, shimmer, echo, fable, sage) and tapping one does not crash. No new React Native red-screen errors observed. Pre-existing warnings (props.pointerEvents deprecated, React 19 element.ref) still present from prior iteration — not caused by these features.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "props.pointerEvents deprecation", "issue": "Boot warning `props.pointerEvents is deprecated. Use style.pointerEvents` persists (likely from @gorhom/bottom-sheet). Non-blocking. Reference: browser console on Create screen."},
+      {"component": "React 19 element.ref", "issue": "Console error `Accessing element.ref was removed in React 19` fires when opening the Music/Voice OptionSheet. Non-blocking on web but should be tracked — likely @gorhom/bottom-sheet or a forwardRef consumer. Reference: /app/frontend/src/components/OptionSheet.tsx (ref forwarding)."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_reels_extras.py",
+    "/app/test_reports/pytest/pytest_extras.xml"
+  ],
+  "action_items": [
+    "Optional: silence the React 19 `element.ref` warning by upgrading/patching @gorhom/bottom-sheet or wrapping forwardRef usage in OptionSheet.tsx.",
+    "Optional: track upstream fix for `props.pointerEvents is deprecated` warning."
+  ],
+  "critical_code_review_comments": [
+    "server.py:194 voice_preview caches the sample mp3 on disk under MEDIA_DIR — good. Consider also serving via storage_client for horizontal scale, but fine for MVP.",
+    "reels_config.py MUSIC_TRACKS uses relative paths; ensure the referenced files (chill.mp3, upbeat.mp3, cinematic.mp3) are shipped in the container — verified indirectly via successful ffmpeg amix in the end-to-end test.",
+    "server.py:230 doc build looks correct — new fields caption_position, caption_size, music_id, watermark all persisted and returned via public_reel."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_reels_extras.py (new)"
+  ],
+  "success_rate": {"backend": "100% (8/8 new + regression not re-run)", "frontend": "100% (all 5 new UI assertions passed)"},
+  "seed_data_creation": "One reel created and auto-deleted by test_reel_with_all_new_fields. Existing demo reels ('Octopus facts', 'Productivity hack') untouched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "New follow-up tests live in /app/backend/tests/test_reels_extras.py. Run with `cd /app/backend && pytest tests/test_reels_extras.py -v --junitxml=/app/test_reports/pytest/pytest_extras.xml`. The end-to-end reel test uses a very short script and completed in ~6s on this environment; it may take longer under load. It auto-skips if the pipeline fails with a `Max budget exceeded` LLM error. Frontend testIDs of interest: setting-music, setting-voice, caption-position-{bottom|center|top}, caption-size-{s|m|l}, watermark-input, preview-{onyx|nova|shimmer|echo|fable|sage}. Bottom tab bar testIDs still do NOT propagate to data-testid on Expo web — use get_by_text('Create'|'Library') for tab nav.",
+  "rca_of_issue": "No bugs found. All four follow-up features are correctly implemented, validated end-to-end, and exposed on both API and UI."
+}

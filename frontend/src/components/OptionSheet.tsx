@@ -21,10 +21,12 @@ type Props = {
   options: SheetOption[];
   selectedId: string;
   onSelect: (id: string) => void;
+  onPreview?: (id: string) => void;
+  previewingId?: string | null;
 };
 
 const OptionSheet = forwardRef<BottomSheetModal, Props>(
-  ({ title, options, selectedId, onSelect }, ref) => {
+  ({ title, options, selectedId, onSelect, onPreview, previewingId }, ref) => {
     const insets = useSafeAreaInsets();
 
     const renderBackdrop = useCallback(
@@ -70,6 +72,24 @@ const OptionSheet = forwardRef<BottomSheetModal, Props>(
                     <Text style={styles.optTitle}>{o.title}</Text>
                     {o.subtitle && <Text style={styles.optSub}>{o.subtitle}</Text>}
                   </View>
+                  {onPreview && (
+                    <Pressable
+                      testID={`preview-${o.id}`}
+                      hitSlop={8}
+                      onPress={(e) => {
+                        (e as any).stopPropagation?.();
+                        haptic.light();
+                        onPreview(o.id);
+                      }}
+                      style={styles.previewBtn}
+                    >
+                      <Ionicons
+                        name={previewingId === o.id ? "pause" : "play"}
+                        size={16}
+                        color={colors.onSurface}
+                      />
+                    </Pressable>
+                  )}
                   {active && <Ionicons name="checkmark-circle" size={22} color={colors.brand} />}
                 </Pressable>
               );
@@ -116,6 +136,16 @@ const styles = StyleSheet.create({
   },
   dot: { width: 16, height: 16, borderRadius: 8 },
   textWrap: { flex: 1 },
+  previewBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.surfaceTertiary,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   optTitle: { fontFamily: font.bodyBold, fontSize: 15, color: colors.onSurface },
   optSub: { fontFamily: font.body, fontSize: 12, color: colors.onSurfaceSecondary, marginTop: 2 },
 });

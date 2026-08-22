@@ -12,7 +12,15 @@ from dotenv import load_dotenv
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 from emergentintegrations.llm.openai import OpenAISpeechToText, OpenAITextToSpeech
 
-from reels_config import BG_MAP, CAPTION_MAP, VOICE_MAP
+from reels_config import (
+    BG_MAP,
+    CAPTION_MAP,
+    CAPTION_POSITION_MAP,
+    CAPTION_SIZE_MAP,
+    MUSIC_MAP,
+    MUSIC_VOLUME,
+    VOICE_MAP,
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -21,6 +29,7 @@ EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
 FONTS_DIR = str(ROOT_DIR / "assets" / "fonts")
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
+MUSIC_DIR = str(ROOT_DIR / "assets" / "music")
 WORDS_PER_SEC = 2.5
 
 
@@ -77,6 +86,15 @@ async def synth_voice(script: str, voice_id: str, out_path: str) -> None:
         f.write(audio)
 
 
+async def synth_voice_sample(voice_id: str, out_path: str) -> None:
+    v = VOICE_MAP.get(voice_id, VOICE_MAP["onyx"])
+    tts = OpenAITextToSpeech(api_key=EMERGENT_LLM_KEY)
+    phrase = f"Hi, I'm {v['name']}. Here's how I'll sound narrating your reels."
+    audio = await tts.generate_speech(text=phrase, model="tts-1", voice=v["openai"], response_format="mp3")
+    with open(out_path, "wb") as f:
+        f.write(audio)
+
+
 # ---------------------------------------------------------------------------
 # 3. Caption alignment (Whisper word timestamps)
 # ---------------------------------------------------------------------------
@@ -122,8 +140,9 @@ def _ass_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("{", "(").replace("}", ")")
 
 
-def _ass_header(caption_color: str) -> str:
+def _ass_header(fontsize: int, alignment: int, marginv: int) -> str:
     # White base fill, thick black outline for readability on any gradient.
+    # A second "WM" style is used for an optional top watermark.
     return (
         "[Script Info]\n"
         "ScriptType: v4.00+\n"
@@ -135,8 +154,10 @@ def _ass_header(caption_color: str) -> str:
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
         "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
         "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        "Style: Cap,Barlow Condensed,104,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,"
-        "-1,0,0,0,100,100,1,0,1,7,3,5,120,120,120,1\n\n"
+        f"Style: Cap,Barlow Condensed,{fontsize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,"
+        f"-1,0,0,0,100,100,1,0,1,7,3,{alignment},120,120,{marginv},1\n"
+        "Style: WM,Barlow Condensed,46,&H2EFFFFFF,&H2EFFFFFF,&H80000000,&H00000000,"
+        "0,0,0,0,100,100,2,0,1,2,0,8,60,60,60,1\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
@@ -154,13 +175,24 @@ def _fmt_time(t: float) -> str:
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
-def build_ass(words, duration, caption_style: str, out_path: str) -> None:
+def build_ass(words, duration, caption_style: str, out_path: str,
+              position: str = "center", size: str = "m", watermark: str = "") -> None:
     color = CAPTION_MAP.get(caption_style, CAPTION_MAP["signal"])["ass_color"]
-    lines = [_ass_header(color)]
+    pos = CAPTION_POSITION_MAP.get(position, CAPTION_POSITION_MAP["center"])
+    sz = CAPTION_SIZE_MAP.get(size, CAPTION_SIZE_MAP["m"])
+    header = _ass_header(sz["fontsize"], pos["an"], pos["marginv"])
+    lines = [header]
+
+    wm = _sanitize_watermark(watermark)
+    total = max(1.0, float(duration or 1.0))
+    if wm:
+        lines.append(
+            f"Dialogue: 1,{_fmt_time(0)},{_fmt_time(total)},WM,,0,0,0,,{_ass_escape(wm)}\n"
+        )
 
     if not words:
-        # Fallback: no timestamps -> nothing to karaoke; leave empty (video still renders).
-        Path(out_path).write_text(lines[0], encoding="utf-8")
+        # Fallback: no timestamps -> keep watermark only (video still renders).
+        Path(out_path).write_text("".join(lines), encoding="utf-8")
         return
 
     # Group words into on-screen phrases of up to 3 words.
@@ -197,7 +229,15 @@ def build_ass(words, duration, caption_style: str, out_path: str) -> None:
 # ---------------------------------------------------------------------------
 # 5. Render with ffmpeg (animated gradient bg + burned captions + voice)
 # ---------------------------------------------------------------------------
-async def render_video(audio_path: str, ass_name: str, bg_theme: str, duration: float, workdir: str, out_path: str) -> None:
+def _sanitize_watermark(text: str) -> str:
+    if not text:
+        return ""
+    text = re.sub(r"[^A-Za-z0-9 @._\-]", "", text).strip()
+    return text[:32]
+
+
+async def render_video(audio_path: str, ass_name: str, bg_theme: str, duration: float,
+                       workdir: str, out_path: str, music_id: str = "none") -> None:
     theme = BG_MAP.get(bg_theme, BG_MAP["ember"])
     c = theme["colors"]
     dur = max(1.0, float(duration))
@@ -206,14 +246,36 @@ async def render_video(audio_path: str, ass_name: str, bg_theme: str, duration: 
         f"gradients=s=1080x1920:c0={c[0]}:c1={c[1]}:c2={c[2]}:c3={c[3]}"
         f":x0=120:y0=120:x1=960:y1=1800:nb_colors=4:seed=7:duration={dur:.2f}:speed=0.006:rate=30"
     )
-    filter_complex = f"[0:v]format=yuv420p,ass={ass_name}:fontsdir={FONTS_DIR}[v]"
+
+    # Video chain: gradient -> captions + optional watermark (both baked into the ASS).
+    vchain = f"[0:v]format=yuv420p,ass={ass_name}:fontsdir={FONTS_DIR}[v]"
+
+    # Optional background music bed.
+    track = MUSIC_MAP.get(music_id or "none", MUSIC_MAP["none"])
+    music_path = None
+    if track["file"]:
+        candidate = os.path.join(MUSIC_DIR, track["file"])
+        if os.path.exists(candidate):
+            music_path = candidate
+
+    inputs = ["-f", "lavfi", "-i", grad, "-i", audio_path]
+    if music_path:
+        inputs += ["-stream_loop", "-1", "-i", music_path]
+        achain = (
+            f"[1:a]volume=1.0[va];[2:a]volume={MUSIC_VOLUME}[ma];"
+            f"[va][ma]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]"
+        )
+        filter_complex = f"{vchain};{achain}"
+        amap = ["-map", "[v]", "-map", "[aout]"]
+    else:
+        filter_complex = vchain
+        amap = ["-map", "[v]", "-map", "1:a"]
 
     cmd = [
         _ffmpeg_exe(), "-y",
-        "-f", "lavfi", "-i", grad,
-        "-i", audio_path,
+        *inputs,
         "-filter_complex", filter_complex,
-        "-map", "[v]", "-map", "1:a",
+        *amap,
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "160k",
         "-t", f"{dur:.2f}", "-shortest",

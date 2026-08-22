@@ -48,3 +48,29 @@ BG_THEMES = [
     },
 ]
 BG_MAP = {b["id"]: b for b in BG_THEMES}
+
+# Caption position -> ASS alignment (\an) + vertical margin.
+CAPTION_POSITIONS = [
+    {"id": "bottom", "name": "Lower", "an": 2, "marginv": 300},
+    {"id": "center", "name": "Center", "an": 5, "marginv": 0},
+    {"id": "top", "name": "Upper", "an": 8, "marginv": 300},
+]
+CAPTION_POSITION_MAP = {p["id"]: p for p in CAPTION_POSITIONS}
+
+# Caption size -> ASS font size.
+CAPTION_SIZES = [
+    {"id": "s", "name": "Small", "fontsize": 80},
+    {"id": "m", "name": "Medium", "fontsize": 104},
+    {"id": "l", "name": "Large", "fontsize": 132},
+]
+CAPTION_SIZE_MAP = {s["id"]: s for s in CAPTION_SIZES}
+
+# Background music beds (CC0). `file` is relative to assets/music; None = silent.
+MUSIC_TRACKS = [
+    {"id": "none", "name": "No music", "file": None},
+    {"id": "lofi", "name": "Lo-Fi Chill", "file": "chill.mp3"},
+    {"id": "upbeat", "name": "Upbeat", "file": "upbeat.mp3"},
+    {"id": "cinematic", "name": "Cinematic", "file": "cinematic.mp3"},
+]
+MUSIC_MAP = {m["id"]: m for m in MUSIC_TRACKS}
+MUSIC_VOLUME = 0.13

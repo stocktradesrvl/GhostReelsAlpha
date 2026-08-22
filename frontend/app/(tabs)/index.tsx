@@ -7,6 +7,7 @@ import { KeyboardAwareScrollView, KeyboardStickyView } from "react-native-keyboa
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api, Config } from "@/src/api";
+import { playPreview, stopPreview } from "@/src/audioPreview";
 import OptionSheet, { SheetOption } from "@/src/components/OptionSheet";
 import PrimaryButton from "@/src/components/PrimaryButton";
 import Segmented from "@/src/components/Segmented";
@@ -26,7 +27,12 @@ export default function CreateScreen() {
   const [seconds, setSeconds] = useState(30);
   const [voiceId, setVoiceId] = useState("onyx");
   const [captionStyle, setCaptionStyle] = useState("signal");
+  const [captionPosition, setCaptionPosition] = useState("center");
+  const [captionSize, setCaptionSize] = useState("m");
   const [bgTheme, setBgTheme] = useState("ember");
+  const [musicId, setMusicId] = useState("none");
+  const [watermark, setWatermark] = useState("");
+  const [previewingVoice, setPreviewingVoice] = useState<string | null>(null);
   const [writing, setWriting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +40,7 @@ export default function CreateScreen() {
   const voiceSheet = useRef<BottomSheetModal>(null);
   const captionSheet = useRef<BottomSheetModal>(null);
   const bgSheet = useRef<BottomSheetModal>(null);
+  const musicSheet = useRef<BottomSheetModal>(null);
 
   useEffect(() => {
     api.getConfig().then((c) => {
@@ -44,6 +51,16 @@ export default function CreateScreen() {
     }).catch(() => setError("Couldn't load options. Pull to retry."));
   }, []);
 
+  const previewVoice = useCallback((id: string) => {
+    if (previewingVoice === id) {
+      stopPreview();
+      setPreviewingVoice(null);
+      return;
+    }
+    setPreviewingVoice(id);
+    playPreview(api.voicePreviewUrl(id));
+  }, [previewingVoice]);
+
   const wordCount = useMemo(
     () => script.trim().split(/\s+/).filter(Boolean).length,
     [script],
@@ -52,6 +69,7 @@ export default function CreateScreen() {
   const voice = config?.voices.find((v) => v.id === voiceId);
   const caption = config?.caption_styles.find((c) => c.id === captionStyle);
   const bg = config?.bg_themes.find((b) => b.id === bgTheme);
+  const music = config?.music_tracks.find((m) => m.id === musicId);
 
   const voiceOptions: SheetOption[] =
     config?.voices.map((v) => ({ id: v.id, title: v.name, subtitle: v.tagline })) || [];
@@ -59,6 +77,8 @@ export default function CreateScreen() {
     config?.caption_styles.map((c) => ({ id: c.id, title: c.name, subtitle: c.hint, dot: c.hex })) || [];
   const bgOptions: SheetOption[] =
     config?.bg_themes.map((b) => ({ id: b.id, title: b.name, swatch: b.preview })) || [];
+  const musicOptions: SheetOption[] =
+    config?.music_tracks.map((m) => ({ id: m.id, title: m.name })) || [];
 
   const writeScript = useCallback(async () => {
     if (!topic.trim()) {
@@ -94,7 +114,11 @@ export default function CreateScreen() {
         seconds,
         voice_id: voiceId,
         caption_style: captionStyle,
+        caption_position: captionPosition,
+        caption_size: captionSize,
         bg_theme: bgTheme,
+        music_id: musicId,
+        watermark: watermark.trim() || undefined,
       } as any);
       haptic.heavy();
       router.push(`/reel/${reel.id}`);
@@ -104,7 +128,7 @@ export default function CreateScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [canGenerate, mode, topic, script, seconds, voiceId, captionStyle, bgTheme, router]);
+  }, [canGenerate, mode, topic, script, seconds, voiceId, captionStyle, captionPosition, captionSize, bgTheme, musicId, watermark, router]);
 
   return (
     <View style={styles.root}>
@@ -233,7 +257,42 @@ export default function CreateScreen() {
             swatch={bg?.preview}
             onPress={() => bgSheet.current?.present()}
           />
+          <SettingRow
+            testID="setting-music"
+            icon="musical-notes"
+            label="Music"
+            value={music?.name || "—"}
+            onPress={() => musicSheet.current?.present()}
+          />
         </View>
+
+        <Text style={styles.section}>CAPTION POSITION</Text>
+        <ChipSelector
+          testID="caption-position"
+          options={config?.caption_positions || []}
+          value={captionPosition}
+          onChange={setCaptionPosition}
+        />
+
+        <Text style={styles.section}>CAPTION SIZE</Text>
+        <ChipSelector
+          testID="caption-size"
+          options={config?.caption_sizes || []}
+          value={captionSize}
+          onChange={setCaptionSize}
+        />
+
+        <Text style={styles.section}>WATERMARK · OPTIONAL</Text>
+        <TextInput
+          testID="watermark-input"
+          value={watermark}
+          onChangeText={setWatermark}
+          placeholder="@yourhandle"
+          placeholderTextColor={colors.onSurfaceSecondary}
+          maxLength={32}
+          autoCapitalize="none"
+          style={[styles.input, { height: 48, paddingVertical: 0 }]}
+        />
 
         {!!error && (
           <View style={styles.errorBox} testID="create-error">
@@ -256,9 +315,18 @@ export default function CreateScreen() {
         </View>
       </KeyboardStickyView>
 
-      <OptionSheet ref={voiceSheet} title="Pick a voice" options={voiceOptions} selectedId={voiceId} onSelect={(id) => { setVoiceId(id); voiceSheet.current?.dismiss(); }} />
+      <OptionSheet
+        ref={voiceSheet}
+        title="Pick a voice"
+        options={voiceOptions}
+        selectedId={voiceId}
+        onPreview={previewVoice}
+        previewingId={previewingVoice}
+        onSelect={(id) => { setVoiceId(id); stopPreview(); setPreviewingVoice(null); voiceSheet.current?.dismiss(); }}
+      />
       <OptionSheet ref={captionSheet} title="Caption style" options={captionOptions} selectedId={captionStyle} onSelect={(id) => { setCaptionStyle(id); captionSheet.current?.dismiss(); }} />
       <OptionSheet ref={bgSheet} title="Background theme" options={bgOptions} selectedId={bgTheme} onSelect={(id) => { setBgTheme(id); bgSheet.current?.dismiss(); }} />
+      <OptionSheet ref={musicSheet} title="Background music" options={musicOptions} selectedId={musicId} onSelect={(id) => { setMusicId(id); musicSheet.current?.dismiss(); }} />
     </View>
   );
 }
@@ -306,6 +374,39 @@ function SettingRow({
         <Ionicons name="chevron-forward" size={16} color={colors.onSurfaceSecondary} />
       </View>
     </Pressable>
+  );
+}
+
+function ChipSelector({
+  options,
+  value,
+  onChange,
+  testID,
+}: {
+  options: { id: string; name: string }[];
+  value: string;
+  onChange: (id: string) => void;
+  testID?: string;
+}) {
+  return (
+    <View style={styles.chipRow} testID={testID}>
+      {options.map((o) => {
+        const active = o.id === value;
+        return (
+          <Pressable
+            key={o.id}
+            testID={`${testID}-${o.id}`}
+            onPress={() => {
+              haptic.light();
+              onChange(o.id);
+            }}
+            style={[styles.chip, active && styles.chipActive]}
+          >
+            <Text style={[styles.chipText, active && styles.chipTextActive]}>{o.name}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 

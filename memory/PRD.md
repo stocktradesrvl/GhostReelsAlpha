@@ -47,7 +47,11 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
 - Create screen (dual mode, AI script writer, editable preview, studio settings sheets, sticky CTA).
 - Generation progress screen (4-stage tracker + % bar), 9:16 player, Save/Share export.
 - Library grid with thumbnails + status badges, pull-to-refresh, empty state.
-- Tested: backend 14/14 pytest pass; frontend flows verified.
+- **Follow-up (2026-08): Background Music** (CC0 lofi beds: lofi/upbeat/cinematic, ffmpeg amix
+  ducked under voice); **Caption Presets** (position bottom/center/top + size s/m/l via ASS);
+  **Brand Watermark** (top-center, rendered via libass overlay — static ffmpeg has no drawtext);
+  **Voice Preview** (`GET /api/voices/{id}/preview` cached TTS sample, played via expo-audio in
+  the voice picker). Tested: backend 8/8 + frontend 5/5 pass.
 
 ## Backlog
 - P1: multiple caption layout presets; background music track option; ElevenLabs voice option.

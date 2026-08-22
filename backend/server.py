@@ -16,7 +16,20 @@ from starlette.middleware.cors import CORSMiddleware
 
 import pipeline
 import storage_client
-from reels_config import BG_MAP, BG_THEMES, CAPTION_MAP, CAPTION_STYLES, VOICE_MAP, VOICES
+from reels_config import (
+    BG_MAP,
+    BG_THEMES,
+    CAPTION_MAP,
+    CAPTION_POSITION_MAP,
+    CAPTION_POSITIONS,
+    CAPTION_SIZE_MAP,
+    CAPTION_SIZES,
+    CAPTION_STYLES,
+    MUSIC_MAP,
+    MUSIC_TRACKS,
+    VOICE_MAP,
+    VOICES,
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -55,12 +68,17 @@ class CreateReelRequest(BaseModel):
     seconds: int = 30
     voice_id: str = "onyx"
     caption_style: str = "signal"
+    caption_position: str = "center"
+    caption_size: str = "m"
     bg_theme: str = "ember"
+    music_id: str = "none"
+    watermark: Optional[str] = None
 
 
 PUBLIC_FIELDS = {
     "id", "title", "input_mode", "topic", "script", "seconds", "voice_id",
-    "caption_style", "bg_theme", "status", "progress", "stage_label", "error",
+    "caption_style", "caption_position", "caption_size", "bg_theme", "music_id",
+    "watermark", "status", "progress", "stage_label", "error",
     "duration", "word_count", "has_video", "created_at", "updated_at",
 }
 
@@ -102,14 +120,22 @@ async def run_pipeline(reel_id: str):
         if not duration or duration <= 0:
             duration = max(3.0, len(script.split()) / pipeline.WORDS_PER_SEC)
         ass_path = os.path.join(workdir, "subs.ass")
-        pipeline.build_ass(words, duration, reel["caption_style"], ass_path)
+        pipeline.build_ass(
+            words, duration, reel["caption_style"], ass_path,
+            position=reel.get("caption_position", "center"),
+            size=reel.get("caption_size", "m"),
+            watermark=reel.get("watermark") or "",
+        )
 
         # Stage 4: render
         await update_reel(reel_id, status="rendering", progress=72, stage_label="Rendering video",
                           duration=round(duration, 2))
         out_path = str(MEDIA_DIR / f"{reel_id}.mp4")
         thumb_path = str(MEDIA_DIR / f"{reel_id}.jpg")
-        await pipeline.render_video(audio_path, "subs.ass", reel["bg_theme"], duration, workdir, out_path)
+        await pipeline.render_video(
+            audio_path, "subs.ass", reel["bg_theme"], duration, workdir, out_path,
+            music_id=reel.get("music_id", "none"),
+        )
         await pipeline.extract_thumbnail(out_path, thumb_path)
 
         # Stage 5: upload to durable object storage
@@ -146,7 +172,14 @@ async def root():
 
 @api_router.get("/config")
 async def get_config():
-    return {"voices": VOICES, "caption_styles": CAPTION_STYLES, "bg_themes": BG_THEMES}
+    return {
+        "voices": VOICES,
+        "caption_styles": CAPTION_STYLES,
+        "caption_positions": CAPTION_POSITIONS,
+        "caption_sizes": CAPTION_SIZES,
+        "bg_themes": BG_THEMES,
+        "music_tracks": MUSIC_TRACKS,
+    }
 
 
 @api_router.post("/script")
@@ -157,14 +190,31 @@ async def make_script(req: ScriptRequest):
     return {"script": script, "word_count": len(script.split())}
 
 
+@api_router.get("/voices/{voice_id}/preview")
+async def voice_preview(voice_id: str):
+    if voice_id not in VOICE_MAP:
+        raise HTTPException(404, "Unknown voice")
+    local = MEDIA_DIR / f"voice_preview_{voice_id}.mp3"
+    if not local.exists():
+        await pipeline.synth_voice_sample(voice_id, str(local))
+    return FileResponse(str(local), media_type="audio/mpeg",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
 @api_router.post("/reels")
 async def create_reel(req: CreateReelRequest):
     if req.voice_id not in VOICE_MAP:
         raise HTTPException(400, "Unknown voice")
     if req.caption_style not in CAPTION_MAP:
         raise HTTPException(400, "Unknown caption style")
+    if req.caption_position not in CAPTION_POSITION_MAP:
+        raise HTTPException(400, "Unknown caption position")
+    if req.caption_size not in CAPTION_SIZE_MAP:
+        raise HTTPException(400, "Unknown caption size")
     if req.bg_theme not in BG_MAP:
         raise HTTPException(400, "Unknown background theme")
+    if req.music_id not in MUSIC_MAP:
+        raise HTTPException(400, "Unknown music track")
 
     script = (req.script or "").strip() or None
     topic = (req.topic or "").strip() or None
@@ -186,7 +236,11 @@ async def create_reel(req: CreateReelRequest):
         "seconds": req.seconds,
         "voice_id": req.voice_id,
         "caption_style": req.caption_style,
+        "caption_position": req.caption_position,
+        "caption_size": req.caption_size,
         "bg_theme": req.bg_theme,
+        "music_id": req.music_id,
+        "watermark": (req.watermark or "").strip()[:32] or None,
         "status": "queued",
         "progress": 0,
         "stage_label": "Queued",

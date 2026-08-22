@@ -84,7 +84,11 @@ export default function ReelDetail() {
         seconds: reel.seconds,
         voice_id: reel.voice_id,
         caption_style: reel.caption_style,
+        caption_position: reel.caption_position,
+        caption_size: reel.caption_size,
         bg_theme: reel.bg_theme,
+        music_id: reel.music_id,
+        watermark: reel.watermark || undefined,
       } as any);
       celebrated.current = false;
       router.replace(`/reel/${fresh.id}`);

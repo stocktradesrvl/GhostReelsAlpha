@@ -2,8 +2,18 @@ const BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api`;
 
 export type Voice = { id: string; name: string; tagline: string };
 export type CaptionStyle = { id: string; name: string; hint: string; hex: string };
+export type CaptionPosition = { id: string; name: string };
+export type CaptionSize = { id: string; name: string };
 export type BgTheme = { id: string; name: string; preview: string[] };
-export type Config = { voices: Voice[]; caption_styles: CaptionStyle[]; bg_themes: BgTheme[] };
+export type MusicTrack = { id: string; name: string };
+export type Config = {
+  voices: Voice[];
+  caption_styles: CaptionStyle[];
+  caption_positions: CaptionPosition[];
+  caption_sizes: CaptionSize[];
+  bg_themes: BgTheme[];
+  music_tracks: MusicTrack[];
+};
 
 export type ReelStatus =
   | "queued" | "scripting" | "voicing" | "captioning"
@@ -18,7 +28,11 @@ export type Reel = {
   seconds: number;
   voice_id: string;
   caption_style: string;
+  caption_position: string;
+  caption_size: string;
   bg_theme: string;
+  music_id: string;
+  watermark: string | null;
   status: ReelStatus;
   progress: number;
   stage_label: string;
@@ -60,4 +74,5 @@ export const api = {
   deleteReel: (id: string) => req<{ ok: boolean }>(`/reels/${id}`, { method: "DELETE" }),
   videoUrl: (id: string) => `${BASE}/reels/${id}/video`,
   thumbUrl: (id: string) => `${BASE}/reels/${id}/thumb`,
+  voicePreviewUrl: (voiceId: string) => `${BASE}/voices/${voiceId}/preview`,
 };
