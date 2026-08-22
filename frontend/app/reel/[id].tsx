@@ -363,6 +363,14 @@ export default function ReelDetail() {
               />
             )}
             <PrimaryButton
+              testID="edit-narration-button"
+              variant="ghost"
+              label="Edit narration"
+              icon="mic-outline"
+              onPress={() => { haptic.select(); router.push(`/lines/${id}`); }}
+              style={{ marginTop: spacing.sm }}
+            />
+            <PrimaryButton
               testID="new-reel-button"
               variant="ghost"
               label="Create another reel"

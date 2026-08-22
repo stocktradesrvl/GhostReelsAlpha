@@ -116,6 +116,15 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
   NOTE: live "Confirm Live Output" run hit the Universal Key BUDGET CAP — real generation returns the friendly
   `error_code=budget` message (working as designed); top up credits to see real AI output.
 
+- **Follow-up (2026-08 · batch 10 · forked): Regenerate Voice Line.** Voiceover is now synthesised **per sentence**
+  (`pipeline.split_sentences` → `synth_voice_segments` → `concat_audio`); each sentence clip + the concatenated track
+  are persisted (`segments:[{text,audio_path}]`, `audio_path`). New endpoints `GET /api/reels/{id}/lines` and
+  `POST /api/reels/{id}/line/{i}/regenerate {text}`. `regenerate_line_task` re-records ONLY the edited sentence,
+  re-concats all clips (unchanged lines stay byte-identical), re-runs Whisper for fresh word timings, updates
+  script/words/duration, then `recompose_reel` (now handles BOTH gradient & AI) re-renders. Frontend: reel detail
+  **Edit narration** → `app/lines/[id].tsx` (per-line text + "Re-record this line", live polling). Verified: backend
+  line-regen→recompose end-to-end (mock, gradient) + narration editor UI renders. Live verify still blocked by budget cap.
+
 ## Backlog
 - P1: multiple caption layout presets; background music track option; ElevenLabs voice option.
 - P2: multi-aspect export (Reels/Shorts variants); onboarding; brand kit (logo watermark).

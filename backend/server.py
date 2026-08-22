@@ -148,6 +148,10 @@ class SceneRegenRequest(BaseModel):
     prompt: Optional[str] = None
 
 
+class LineRegenRequest(BaseModel):
+    text: str
+
+
 PUBLIC_FIELDS = {
     "id", "title", "input_mode", "topic", "script", "series_id", "episode_number", "seconds", "visual_mode", "image_style", "voice_id", "voice_speed",
     "caption_style", "caption_position", "caption_size", "caption_font", "caption_anim",
@@ -235,6 +239,7 @@ def build_reel_doc(s: ReelSettings, input_mode: str, topic, script, title: str,
         "audio_path": None,
         "words": None,
         "scenes": None,
+        "segments": None,
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
@@ -284,15 +289,24 @@ async def run_pipeline(reel_id: str):
                 script = await pipeline.generate_script(reel["topic"], reel.get("seconds", 30))
             await update_reel(reel_id, script=script, word_count=len(script.split()))
 
-        # Stage 2: voiceover
+        # Stage 2: voiceover — synth per-sentence so a single line can be re-recorded later
         await update_reel(reel_id, status="voicing", progress=30, stage_label="Recording voiceover")
         audio_path = os.path.join(workdir, "voice.mp3")
         speed = VOICE_SPEED_MAP.get(reel.get("voice_speed", "normal"), VOICE_SPEED_MAP["normal"])["speed"]
-        await pipeline.synth_voice(script, reel["voice_id"], audio_path, speed=speed)
-        # Persist the voice track so scenes/captions can be re-rendered without re-voicing.
+        sentences = pipeline.split_sentences(script)
+        seg_paths = await pipeline.synth_voice_segments(sentences, reel["voice_id"], workdir, speed=speed)
+        await pipeline.concat_audio(seg_paths, audio_path, transcript=" ".join(sentences))
+        # Persist the full voice track + each sentence clip (for per-line re-record).
         with open(audio_path, "rb") as f:
             apath = f"{storage_client.APP_NAME}/reels/{reel_id}/voice.mp3"
             await run_in_threadpool(storage_client.put_object, apath, f.read(), "audio/mpeg")
+        segments = []
+        for i, (sent, sp) in enumerate(zip(sentences, seg_paths)):
+            seg_store = f"{storage_client.APP_NAME}/reels/{reel_id}/seg_{i}.mp3"
+            with open(sp, "rb") as f:
+                await run_in_threadpool(storage_client.put_object, seg_store, f.read(), "audio/mpeg")
+            segments.append({"text": sent, "audio_path": seg_store})
+        await update_reel(reel_id, segments=segments)
 
         # Stage 3: captions
         await update_reel(reel_id, status="captioning", progress=55, stage_label="Aligning captions")
@@ -391,11 +405,12 @@ async def finalize_and_upload(reel, reel_id, workdir, out_path, thumb_path, dura
 
 
 async def recompose_reel(reel_id: str):
-    """Re-render an AI reel from stored voice + word timings + scene images (no re-voicing)."""
+    """Re-render from stored voice + word timings (+ scene images for AI) — no re-voicing."""
     workdir = pipeline.new_workdir()
     try:
         reel = await db.reels.find_one({"id": reel_id})
-        if not reel or not reel.get("audio_path") or not reel.get("scenes"):
+        is_ai = reel and reel.get("visual_mode") == "ai"
+        if not reel or not reel.get("audio_path") or (is_ai and not reel.get("scenes")):
             await update_reel(reel_id, status="failed", stage_label="Re-render failed",
                               error="This reel can't be re-rendered.", error_code="generic")
             return
@@ -421,21 +436,29 @@ async def recompose_reel(reel_id: str):
             caption_anim=reel.get("caption_anim", "pop"),
         )
 
-        images = []
-        for i, s in enumerate(reel["scenes"]):
-            ip = os.path.join(workdir, f"scene_{i}.png")
-            content, _ = await run_in_threadpool(storage_client.get_object, s["image_path"])
-            with open(ip, "wb") as f:
-                f.write(content)
-            images.append(ip)
-
         out_path = str(MEDIA_DIR / f"{reel_id}.mp4")
         thumb_path = str(MEDIA_DIR / f"{reel_id}.jpg")
-        await pipeline.render_video_images(
-            audio_path, "subs.ass", images, duration, workdir, out_path,
-            music_id=reel.get("music_id", "none"),
-            music_volume=reel.get("music_volume", 0.13),
-        )
+        if is_ai:
+            images = []
+            for i, s in enumerate(reel["scenes"]):
+                ip = os.path.join(workdir, f"scene_{i}.png")
+                content, _ = await run_in_threadpool(storage_client.get_object, s["image_path"])
+                with open(ip, "wb") as f:
+                    f.write(content)
+                images.append(ip)
+            await pipeline.render_video_images(
+                audio_path, "subs.ass", images, duration, workdir, out_path,
+                music_id=reel.get("music_id", "none"),
+                music_volume=reel.get("music_volume", 0.13),
+            )
+        else:
+            await pipeline.render_video(
+                audio_path, "subs.ass", reel["bg_theme"], duration, workdir, out_path,
+                music_id=reel.get("music_id", "none"),
+                music_volume=reel.get("music_volume", 0.13),
+                bg_motion=reel.get("bg_motion", "subtle"),
+                custom_colors=[reel.get("custom_c1"), reel.get("custom_c2")],
+            )
         await pipeline.extract_thumbnail(out_path, thumb_path)
         await finalize_and_upload(reel, reel_id, workdir, out_path, thumb_path, duration)
         logger.info("Reel %s recomposed", reel_id)
@@ -476,6 +499,57 @@ async def regenerate_scene_task(reel_id: str, index: int, prompt: str = None):
         await update_reel(reel_id, scenes=scenes)
     except Exception as e:  # noqa: BLE001
         logger.exception("Scene regen failed for %s[%s]", reel_id, index)
+        code, friendly = classify_error(e)
+        await update_reel(reel_id, status="failed", stage_label="Re-render failed",
+                          error=friendly, error_code=code)
+        shutil.rmtree(workdir, ignore_errors=True)
+        return
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+    await recompose_reel(reel_id)
+
+
+async def regenerate_line_task(reel_id: str, index: int, text: str):
+    """Re-record one sentence, splice it back into the voice track, re-time captions, re-render."""
+    workdir = pipeline.new_workdir()
+    try:
+        reel = await db.reels.find_one({"id": reel_id})
+        segments = list(reel.get("segments") or [])
+        if index < 0 or index >= len(segments):
+            return
+        await update_reel(reel_id, status="voicing", progress=25, stage_label="Re-recording line",
+                          error=None, error_code=None)
+        segments[index]["text"] = (text or "").strip()[:400] or segments[index]["text"]
+
+        speed = VOICE_SPEED_MAP.get(reel.get("voice_speed", "normal"), VOICE_SPEED_MAP["normal"])["speed"]
+        # Re-record ONLY the edited sentence.
+        new_seg = os.path.join(workdir, f"seg_{index}.mp3")
+        await pipeline.synth_voice(segments[index]["text"], reel["voice_id"], new_seg, speed=speed)
+        with open(new_seg, "rb") as f:
+            await run_in_threadpool(storage_client.put_object, segments[index]["audio_path"], f.read(), "audio/mpeg")
+
+        # Rebuild the full voice track from all (mostly unchanged) sentence clips.
+        seg_paths = []
+        for i, seg in enumerate(segments):
+            lp = os.path.join(workdir, f"seg_{i}.mp3")
+            content, _ = await run_in_threadpool(storage_client.get_object, seg["audio_path"])
+            with open(lp, "wb") as f:
+                f.write(content)
+            seg_paths.append(lp)
+        audio_path = os.path.join(workdir, "voice.mp3")
+        transcript = " ".join(s["text"] for s in segments)
+        await pipeline.concat_audio(seg_paths, audio_path, transcript=transcript)
+        with open(audio_path, "rb") as f:
+            await run_in_threadpool(storage_client.put_object, reel["audio_path"], f.read(), "audio/mpeg")
+
+        await update_reel(reel_id, status="captioning", progress=55, stage_label="Re-aligning captions")
+        words, duration = await pipeline.transcribe_words(audio_path)
+        if not duration or duration <= 0:
+            duration = max(3.0, len(transcript.split()) / pipeline.WORDS_PER_SEC)
+        await update_reel(reel_id, segments=segments, words=words, script=transcript,
+                          word_count=len(transcript.split()), duration=round(duration, 2))
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Line regen failed for %s[%s]", reel_id, index)
         code, friendly = classify_error(e)
         await update_reel(reel_id, status="failed", stage_label="Re-render failed",
                           error=friendly, error_code=code)
@@ -843,6 +917,42 @@ async def regenerate_scene(reel_id: str, index: int, req: SceneRegenRequest):
                       error=None, error_code=None)
     import asyncio
     asyncio.create_task(regenerate_scene_task(reel_id, index, req.prompt))
+    return public_reel(await db.reels.find_one({"id": reel_id}))
+
+
+@api_router.get("/reels/{reel_id}/lines")
+async def get_lines(reel_id: str):
+    doc = await db.reels.find_one({"id": reel_id})
+    if not doc:
+        raise HTTPException(404, "Reel not found")
+    segments = doc.get("segments") or []
+    editable = bool(doc.get("audio_path") and segments)
+    return {
+        "editable": editable,
+        "status": doc.get("status"),
+        "lines": [{"index": i, "text": s.get("text", "")} for i, s in enumerate(segments)],
+    }
+
+
+@api_router.post("/reels/{reel_id}/line/{index}/regenerate")
+async def regenerate_line(reel_id: str, index: int, req: LineRegenRequest):
+    doc = await db.reels.find_one({"id": reel_id})
+    if not doc:
+        raise HTTPException(404, "Reel not found")
+    segments = doc.get("segments") or []
+    if not doc.get("audio_path") or not segments:
+        raise HTTPException(400, "This reel doesn't support line editing")
+    if index < 0 or index >= len(segments):
+        raise HTTPException(404, "Line not found")
+    if not (req.text or "").strip():
+        raise HTTPException(400, "Line text is required")
+    if doc.get("status") not in ("ready", "failed"):
+        raise HTTPException(409, "Reel is still processing")
+
+    await update_reel(reel_id, status="voicing", progress=20, stage_label="Re-recording line",
+                      error=None, error_code=None)
+    import asyncio
+    asyncio.create_task(regenerate_line_task(reel_id, index, req.text))
     return public_reel(await db.reels.find_one({"id": reel_id}))
 
 

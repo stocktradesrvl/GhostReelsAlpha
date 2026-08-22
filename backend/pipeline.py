@@ -236,6 +236,55 @@ async def synth_voice(script: str, voice_id: str, out_path: str, speed: float = 
         f.write(audio)
 
 
+def split_sentences(script: str) -> list:
+    """Split a narration script into spoken sentences for per-line editing."""
+    flat = re.sub(r"\s+", " ", script or "").strip()
+    if not flat:
+        return []
+    parts = re.split(r"(?<=[.!?])\s+", flat)
+    out = []
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        # Merge tiny fragments into the previous sentence to avoid choppy clips.
+        if out and len(p.split()) <= 2:
+            out[-1] = (out[-1] + " " + p).strip()
+        else:
+            out.append(p)
+    return out or [flat]
+
+
+async def synth_voice_segments(sentences: list, voice_id: str, workdir: str,
+                               speed: float = 1.0) -> list:
+    """TTS each sentence into its own mp3 clip; returns clip paths in order."""
+    paths = []
+    for i, sentence in enumerate(sentences):
+        out = os.path.join(workdir, f"seg_{i}.mp3")
+        await synth_voice(sentence, voice_id, out, speed=speed)
+        paths.append(out)
+    return paths
+
+
+async def concat_audio(paths: list, out_path: str, transcript: str = None) -> None:
+    """Concatenate sentence mp3 clips into one voice track (re-encoded)."""
+    if len(paths) == 1:
+        shutil.copyfile(paths[0], out_path)
+    else:
+        inputs = []
+        for p in paths:
+            inputs += ["-i", p]
+        streams = "".join(f"[{i}:a]" for i in range(len(paths)))
+        fc = f"{streams}concat=n={len(paths)}:v=0:a=1[a]"
+        await _run_ffmpeg([
+            _ffmpeg_exe(), "-y", *inputs, "-filter_complex", fc,
+            "-map", "[a]", "-c:a", "libmp3lame", "-q:a", "4", out_path,
+        ])
+    if MOCK and transcript is not None:
+        Path(out_path + ".txt").write_text(transcript, encoding="utf-8")
+
+
+
 async def synth_voice_sample(voice_id: str, out_path: str) -> None:
     v = VOICE_MAP.get(voice_id, VOICE_MAP["onyx"])
     tts = OpenAITextToSpeech(api_key=EMERGENT_LLM_KEY)

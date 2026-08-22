@@ -146,6 +146,15 @@ export const api = {
       body: JSON.stringify({ prompt: prompt || null }),
     }),
   sceneImageUrl: (id: string, index: number) => `${BASE}/reels/${id}/scene/${index}/image`,
+  getLines: (id: string) =>
+    req<{ editable: boolean; status: string; lines: { index: number; text: string }[] }>(
+      `/reels/${id}/lines`,
+    ),
+  regenerateLine: (id: string, index: number, text: string) =>
+    req<Reel>(`/reels/${id}/line/${index}/regenerate`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
   listOutros: () => req<Outro[]>("/outros"),
   deleteOutro: (id: string) => req<{ ok: boolean }>(`/outros/${id}`, { method: "DELETE" }),
   outroVideoUrl: (id: string) => `${BASE}/outros/${id}/video`,
