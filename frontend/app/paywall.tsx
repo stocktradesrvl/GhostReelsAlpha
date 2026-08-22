@@ -100,6 +100,12 @@ export default function PaywallScreen() {
           <View style={styles.heroBadge}><Ionicons name="rocket" size={26} color={colors.brand} /></View>
           <Text style={styles.heroTitle}>Create without limits</Text>
           <Text style={styles.heroSub}>Unlock unlimited AI reels on the built-in engine — no API keys needed.</Text>
+          {!isSubscribed && (
+            <View style={styles.heroTrial}>
+              <Ionicons name="gift" size={14} color={colors.brand} />
+              <Text style={styles.heroTrialTxt}>Try 7 days free</Text>
+            </View>
+          )}
         </View>
 
         <View style={styles.perks}>
@@ -234,6 +240,8 @@ const styles = StyleSheet.create({
   heroBadge: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.brandTertiary, alignItems: "center", justifyContent: "center", marginBottom: spacing.md },
   heroTitle: { fontFamily: font.display, fontSize: 30, color: colors.onSurface, textAlign: "center", letterSpacing: 0.4 },
   heroSub: { fontFamily: font.body, fontSize: 14, color: colors.onSurfaceSecondary, textAlign: "center", marginTop: spacing.xs, lineHeight: 20, paddingHorizontal: spacing.md },
+  heroTrial: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: spacing.md, paddingHorizontal: spacing.md, paddingVertical: 7, borderRadius: radius.pill, backgroundColor: colors.brandTertiary, borderWidth: 1, borderColor: colors.brand },
+  heroTrialTxt: { fontFamily: font.bodyBold, fontSize: 13, color: colors.brand, letterSpacing: 0.3 },
   perks: { marginTop: spacing.xl, gap: spacing.md },
   perkRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   perkTxt: { flex: 1, fontFamily: font.bodyMed, fontSize: 15, color: colors.onSurface },
