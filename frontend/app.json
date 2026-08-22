@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.mobiledev.swa3k5"
+      "bundleIdentifier": "com.ghostreelalpha.app"
     },
     "android": {
       "adaptiveIcon": {
