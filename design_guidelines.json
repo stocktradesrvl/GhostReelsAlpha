@@ -1,0 +1,197 @@
+{
+  "app_name": "Faceless AI Reels",
+  "personality": "7 Dark-First Utility DARK",
+  "personality_one_liner": "A high-performance, command-center creator studio built for speed, contrast, and operational clarity.",
+  "color": {
+    "light": {
+      "surface": "#FFFFFF",
+      "onSurface": "#09090B",
+      "surfaceSecondary": "#F4F4F5",
+      "onSurfaceSecondary": "#52525B",
+      "surfaceTertiary": "#E4E4E7",
+      "onSurfaceTertiary": "#3F3F46",
+      "surfaceInverse": "#09090B",
+      "onSurfaceInverse": "#FFFFFF",
+      "brand": "#EF4444",
+      "brandPrimary": "#DC2626",
+      "onBrandPrimary": "#FFFFFF",
+      "brandSecondary": "#B91C1C",
+      "onBrandSecondary": "#FFFFFF",
+      "brandTertiary": "#FEE2E2",
+      "onBrandTertiary": "#991B1B",
+      "success": "#16A34A",
+      "onSuccess": "#FFFFFF",
+      "warning": "#CA8A04",
+      "onWarning": "#FFFFFF",
+      "error": "#DC2626",
+      "onError": "#FFFFFF",
+      "info": "#0F766E",
+      "onInfo": "#FFFFFF",
+      "border": "#E4E4E7",
+      "borderStrong": "#A1A1AA",
+      "divider": "#F4F4F5"
+    },
+    "dark": {
+      "surface": "#09090B",
+      "onSurface": "#FAFAFA",
+      "surfaceSecondary": "#18181B",
+      "onSurfaceSecondary": "#A1A1AA",
+      "surfaceTertiary": "#27272A",
+      "onSurfaceTertiary": "#D4D4D8",
+      "surfaceInverse": "#FAFAFA",
+      "onSurfaceInverse": "#09090B",
+      "brand": "#EF4444",
+      "brandPrimary": "#DC2626",
+      "onBrandPrimary": "#FFFFFF",
+      "brandSecondary": "#F87171",
+      "onBrandSecondary": "#09090B",
+      "brandTertiary": "#450A0A",
+      "onBrandTertiary": "#FECACA",
+      "success": "#22C55E",
+      "onSuccess": "#000000",
+      "warning": "#EAB308",
+      "onWarning": "#000000",
+      "error": "#EF4444",
+      "onError": "#FFFFFF",
+      "info": "#0D9488",
+      "onInfo": "#FFFFFF",
+      "border": "#27272A",
+      "borderStrong": "#52525B",
+      "divider": "#18181B"
+    }
+  },
+  "typography": {
+    "displayFontFamily": "Barlow Condensed",
+    "textFontFamily": "Manrope",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Use tight spacing for a dense, professional tool feel. Group related settings closely to optimize vertical real estate without scrolling.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 4,
+    "md": 8,
+    "lg": 12,
+    "pill": 999
+  },
+  "shadow_tier": "0",
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": false,
+    "do's": [
+      "Use solid surfaceSecondary with dividers to separate content layers in this dark-first utility theme."
+    ],
+    "dont's": [
+      "Avoid glassmorphism/blur as it softens the interface; this personality requires sharp, high-contrast, machine-fast surfaces."
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Create Reel (Compose)",
+      "purpose": "Primary workspace for prompt/script input and video configuration.",
+      "states": {
+        "loading": "Centered brandPrimary spinner.",
+        "empty": "N/A - Screen defaults to an active text area.",
+        "error": "Inline error banner below text input if script generation fails."
+      },
+      "layout": "Use a segmented control at the top to toggle between 'Paste Script' and 'Generate from Topic'. Below, a large surfaceTertiary text area that auto-expands. Below the input, horizontal scroll blocks (tiles) for Voice, Caption Style, and Background Gradient Theme. A persistent, full-width brandPrimary CTA ('Generate Reel') sits sticky at the bottom."
+    },
+    {
+      "name": "Settings / Configurations (Bottom Sheet)",
+      "purpose": "Contextual menus for selecting Voice, Background Theme, and Captions without leaving the Create context.",
+      "states": {
+        "loading": "Skeleton rows for loading voices.",
+        "empty": "N/A",
+        "error": "Error loading assets with a retry button."
+      },
+      "layout": "Triggered from the Create screen. List of selectable options (e.g., Voice Actors with small play icons). The selected item features a borderStrong outline. Backgrounds show abstract neon gradient thumbnails."
+    },
+    {
+      "name": "Generation Progress",
+      "purpose": "Real-time, transparent tracking of the 4-stage pipeline render.",
+      "states": {
+        "loading": "N/A - This entire screen is a loading state.",
+        "empty": "N/A",
+        "error": "Red error text on the failed pipeline stage, with a primary 'Retry' button at the bottom."
+      },
+      "layout": "Dark abstract neon background (heavily blurred and overlaid with a dark gradient scrim). A vertical timeline or stacked progress module centers on the screen showing: Script -> Voice -> Captions -> Render. The active stage pulses gently. Fast, instant transition feel."
+    },
+    {
+      "name": "Video Preview & Export",
+      "purpose": "Full-screen playback of the generated 9:16 vertical MP4 with export options.",
+      "states": {
+        "loading": "Skeleton video frame.",
+        "empty": "N/A",
+        "error": "Failed to load video, show retry button."
+      },
+      "layout": "Edge-to-edge 9:16 vertical video player. A top navigation bar with a subtle back button. Center overlay for Play/Pause. A sticky bottom action bar (surfaceSecondary) housing 'Download MP4' and 'Share' buttons."
+    },
+    {
+      "name": "Library (History)",
+      "purpose": "Archive of all past generated reels and their pipeline status.",
+      "states": {
+        "loading": "Skeleton grid of 9:16 thumbnails.",
+        "empty": "A dark studio microphone image, with text 'No reels generated yet.' and a CTA to 'Create Reel'.",
+        "error": "Failed to load history, retry button."
+      },
+      "layout": "2-column masonry or grid layout of vertical thumbnails. Each card displays a status badge (e.g., brandTertiary pill with success/warning/error colors indicating Ready, Generating, or Failed) and the creation date. Cards use border styling (1pt border) rather than shadows."
+    }
+  ],
+  "images": {
+    "empty_library": {
+      "url": "https://images.pexels.com/photos/31050644/pexels-photo-31050644.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "alt": "Studio microphone against a dark backdrop"
+    },
+    "progress_bg_1": {
+      "url": "https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMG5lb24lMjBncmFkaWVudCUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzg3MzU5OTAyfDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Abstract purple and pink gradient waves"
+    },
+    "progress_bg_2": {
+      "url": "https://images.pexels.com/photos/7135078/pexels-photo-7135078.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "alt": "Dynamic abstract gradient background"
+    }
+  },
+  "haptics": {
+    "button_press": "selection",
+    "toggle_mode": "light",
+    "stage_complete": "success",
+    "generation_finish": "heavy",
+    "error": "error"
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the Dark-First Utility guidelines. Default to the DARK theme palette regardless of system settings, as this is a 'dark creator studio' app.",
+    "Do NOT use indigo, violet, purple, or any blue hues for UI elements per the NO TOLERANCE rule. The primary brand accent is Signal Red.",
+    "Typography MUST use Barlow Condensed for display/headings and Manrope for text/body. Ensure font weights do not exceed 500.",
+    "Use tight spacing, sharp corners (sm: 4, md: 8), and 1pt borders to separate elements instead of shadows or glassmorphism. This should feel like a machine-fast, pro operational tool.",
+    "The Create screen should feature a sticky primary CTA at the bottom, outside of the scrolling content, so users can 'Generate Reel' without scrolling.",
+    "On the Generation Progress screen, use the abstract gradient backgrounds provided in the images list, but ensure you apply a gradient scrim (top-to-bottom, ending at >=70% surfaceInverse) so the pipeline text remains completely readable.",
+    "When placing text over any image or thumbnail (like in the Library grid), a dark gradient scrim must be used behind the text.",
+    "Avoid glassmorphism. Use solid surfaceSecondary or surfaceTertiary containers for elevation and visual hierarchy."
+  ]
+}

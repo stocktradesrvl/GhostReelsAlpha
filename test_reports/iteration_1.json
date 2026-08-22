@@ -1,0 +1,43 @@
+{
+  "summary": "Comprehensive backend + frontend testing of Faceless AI Reels. Backend: 14/14 pytest tests passed including config, script generation, both SCRIPT and TOPIC mode end-to-end pipelines (queued -> scripting -> voicing -> captioning -> rendering -> uploading -> ready), video/thumb streaming, delete, list ordering, and all validation (empty script, invalid voice/caption/bg -> 400) in ~31s. Frontend UI: home Create screen renders (topic input, duration chips, Write-Script-with-AI, Studio settings sheets, Generate Reel CTA); the Segmented control switches between TOPIC and PASTE SCRIPT modes; the voice bottom-sheet opens with all 6 voices; tapping Generate Reel navigates to /reel/{id}; Library tab lists reels newest-first with thumbnails and status pills; tapping a READY reel opens the player screen with Download MP4, Create-another-reel, delete and back buttons. During UI polling the EMERGENT_LLM_KEY hit its shared budget cap (Max budget: $1.4) after multiple pipeline runs earlier in the session, so the last UI-triggered reel surfaced the 'Generation failed' state correctly — this is an environment budget limit, not a code defect. No React Native red screen. One minor Expo quirk noted: tabBarTestID does not propagate to data-testid on web.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "expo-file-system", "issue": "Uses the legacy import path `import * as FileSystem from 'expo-file-system/legacy'` in /app/frontend/app/reel/[id].tsx:3. Migrate to the current expo-file-system API (File/Directory) when convenient."},
+      {"component": "Tabs.Screen tabBarTestID", "issue": "`tabBarTestID` set in /app/frontend/app/(tabs)/_layout.tsx (tab-create/tab-library) is not emitted as data-testid on the Expo web preview. Tapping via visible label text works, but automated tests that key off testID will miss the tab bar on web. Consider wrapping the tab bar in a custom component with testID, or documenting this limitation."},
+      {"component": "props.pointerEvents deprecation", "issue": "Console warning during boot: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Likely coming from a third-party dependency (gorhom/bottom-sheet or keyboard-controller); not blocking but worth tracking."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/test_reels_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "The Emergent LLM budget was hit during testing. E1 / user must top-up or reset the budget before further end-to-end LLM/TTS/Whisper runs. The failure surface ('Generation failed' with budget message) works correctly.",
+    "Consider migrating `expo-file-system/legacy` import in /app/frontend/app/reel/[id].tsx to the new File/Directory API.",
+    "Optional: replace `tabBarTestID` with a custom tab bar wrapper so testID works on web, or add stable text-based selectors."
+  ],
+  "critical_code_review_comments": [
+    "server.py:204 uses `import asyncio` inside the handler and `asyncio.create_task` for the pipeline. That works, but consider FastAPI's BackgroundTasks or an explicit task registry so tasks survive worker restarts and don't get lost on shutdown.",
+    "storage_client.py caches `_storage_key` in a module-global; fine for a single worker but not thread/process safe across gunicorn workers. Acceptable for MVP.",
+    "reel/[id].tsx uses expo-file-system/legacy — flagged above.",
+    "library.tsx useFocusEffect dep list uses `reels.length` + serialized statuses which causes the effect to rebind on every status change; it works but is slightly wasteful. Not blocking."
+  ],
+  "updated_files": [
+    "/app/backend/tests/conftest.py (new)",
+    "/app/backend/tests/test_reels_api.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "None — reused the existing 'Octopus facts' demo reel plus reels created and cleaned up by the pytest suite. One additional 'Generation failed' reel was created via the UI while validating the failed-state screen (LLM budget exhausted).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest suite lives in /app/backend/tests/. Run with `cd /app/backend && pytest tests/ -v --junitxml=/app/test_reports/pytest/pytest_results.xml`. Each end-to-end pipeline test consumes real OpenAI TTS + Whisper + gpt-5.4 tokens through the shared EMERGENT_LLM_KEY. If the key hits its budget again the pipeline tests will start failing with 'Budget has been exceeded'. Test fixture polls up to 210s for topic-mode reels. Frontend testIDs are all wired on interactive elements except the bottom Tabs bar (tabBarTestID doesn't propagate on web); use `page.get_by_text('Library')` / `page.get_by_text('Create')` for tab navigation in Playwright.",
+  "rca_of_issue": "No product bug found. The only failure observed in this iteration was a 500 from POST /api/script driven by EMERGENT_LLM_KEY budget exhaustion after multiple end-to-end pipeline runs. The frontend surfaces this correctly on both the create screen (error banner) and the reel screen (Generation failed with retry). Recovery: reset/top-up the Emergent LLM budget."
+}

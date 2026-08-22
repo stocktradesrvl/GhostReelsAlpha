@@ -1,0 +1,412 @@
+import { BottomSheetModal } from "@gorhom/bottom-sheet";
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAwareScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { api, Config } from "@/src/api";
+import OptionSheet, { SheetOption } from "@/src/components/OptionSheet";
+import PrimaryButton from "@/src/components/PrimaryButton";
+import Segmented from "@/src/components/Segmented";
+import { haptic } from "@/src/haptics";
+import { colors, font, radius, spacing } from "@/src/theme";
+
+const DURATIONS = [15, 30, 60];
+
+export default function CreateScreen() {
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+
+  const [config, setConfig] = useState<Config | null>(null);
+  const [mode, setMode] = useState<"topic" | "script">("topic");
+  const [topic, setTopic] = useState("");
+  const [script, setScript] = useState("");
+  const [seconds, setSeconds] = useState(30);
+  const [voiceId, setVoiceId] = useState("onyx");
+  const [captionStyle, setCaptionStyle] = useState("signal");
+  const [bgTheme, setBgTheme] = useState("ember");
+  const [writing, setWriting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const voiceSheet = useRef<BottomSheetModal>(null);
+  const captionSheet = useRef<BottomSheetModal>(null);
+  const bgSheet = useRef<BottomSheetModal>(null);
+
+  useEffect(() => {
+    api.getConfig().then((c) => {
+      setConfig(c);
+      if (c.voices[0]) setVoiceId(c.voices[0].id);
+      if (c.caption_styles[0]) setCaptionStyle(c.caption_styles[0].id);
+      if (c.bg_themes[0]) setBgTheme(c.bg_themes[0].id);
+    }).catch(() => setError("Couldn't load options. Pull to retry."));
+  }, []);
+
+  const wordCount = useMemo(
+    () => script.trim().split(/\s+/).filter(Boolean).length,
+    [script],
+  );
+
+  const voice = config?.voices.find((v) => v.id === voiceId);
+  const caption = config?.caption_styles.find((c) => c.id === captionStyle);
+  const bg = config?.bg_themes.find((b) => b.id === bgTheme);
+
+  const voiceOptions: SheetOption[] =
+    config?.voices.map((v) => ({ id: v.id, title: v.name, subtitle: v.tagline })) || [];
+  const captionOptions: SheetOption[] =
+    config?.caption_styles.map((c) => ({ id: c.id, title: c.name, subtitle: c.hint, dot: c.hex })) || [];
+  const bgOptions: SheetOption[] =
+    config?.bg_themes.map((b) => ({ id: b.id, title: b.name, swatch: b.preview })) || [];
+
+  const writeScript = useCallback(async () => {
+    if (!topic.trim()) {
+      setError("Enter a topic first.");
+      return;
+    }
+    setError(null);
+    setWriting(true);
+    try {
+      const res = await api.generateScript(topic.trim(), seconds);
+      setScript(res.script);
+      haptic.success();
+    } catch (e: any) {
+      setError(e.message || "Script generation failed.");
+      haptic.error();
+    } finally {
+      setWriting(false);
+    }
+  }, [topic, seconds]);
+
+  const canGenerate =
+    mode === "script" ? script.trim().length > 0 : topic.trim().length > 0 || script.trim().length > 0;
+
+  const generate = useCallback(async () => {
+    if (!canGenerate) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      const reel = await api.createReel({
+        input_mode: mode,
+        topic: mode === "topic" ? topic.trim() : undefined,
+        script: script.trim() || undefined,
+        seconds,
+        voice_id: voiceId,
+        caption_style: captionStyle,
+        bg_theme: bgTheme,
+      } as any);
+      haptic.heavy();
+      router.push(`/reel/${reel.id}`);
+    } catch (e: any) {
+      setError(e.message || "Couldn't start generation.");
+      haptic.error();
+    } finally {
+      setSubmitting(false);
+    }
+  }, [canGenerate, mode, topic, script, seconds, voiceId, captionStyle, bgTheme, router]);
+
+  return (
+    <View style={styles.root}>
+      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
+        <View>
+          <Text style={styles.brand}>FACELESS REELS</Text>
+          <Text style={styles.sub}>Topic → script → voice → captions → MP4</Text>
+        </View>
+        <View style={styles.logo}>
+          <Ionicons name="flash" size={20} color={colors.brand} />
+        </View>
+      </View>
+
+      <KeyboardAwareScrollView
+        bottomOffset={90}
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: 140 }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Segmented
+          testID="mode-segment"
+          options={[{ id: "topic", label: "GENERATE FROM TOPIC" }, { id: "script", label: "PASTE SCRIPT" }]}
+          value={mode}
+          onChange={(m) => setMode(m as "topic" | "script")}
+        />
+
+        {mode === "topic" ? (
+          <>
+            <Text style={styles.section}>TOPIC</Text>
+            <TextInput
+              testID="topic-input"
+              value={topic}
+              onChangeText={setTopic}
+              placeholder="e.g. 3 mind-blowing facts about deep sea creatures"
+              placeholderTextColor={colors.onSurfaceSecondary}
+              multiline
+              style={[styles.input, { minHeight: 88 }]}
+            />
+
+            <Text style={styles.section}>LENGTH</Text>
+            <View style={styles.chipRow}>
+              {DURATIONS.map((d) => {
+                const active = d === seconds;
+                return (
+                  <Pressable
+                    key={d}
+                    testID={`duration-${d}`}
+                    onPress={() => {
+                      haptic.light();
+                      setSeconds(d);
+                    }}
+                    style={[styles.chip, active && styles.chipActive]}
+                  >
+                    <Text style={[styles.chipText, active && styles.chipTextActive]}>{d}s</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <PrimaryButton
+              testID="write-script-button"
+              variant="ghost"
+              icon="sparkles"
+              label={script ? "Rewrite script with AI" : "Write script with AI"}
+              loading={writing}
+              onPress={writeScript}
+              style={{ marginTop: spacing.lg }}
+            />
+
+            {!!script && (
+              <>
+                <View style={styles.scriptHead}>
+                  <Text style={styles.section}>SCRIPT · EDITABLE</Text>
+                  <Text style={styles.wordCount}>{wordCount} words</Text>
+                </View>
+                <TextInput
+                  testID="script-preview-input"
+                  value={script}
+                  onChangeText={setScript}
+                  multiline
+                  style={[styles.input, { minHeight: 160 }]}
+                />
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <View style={styles.scriptHead}>
+              <Text style={styles.section}>YOUR SCRIPT</Text>
+              <Text style={styles.wordCount}>{wordCount} words</Text>
+            </View>
+            <TextInput
+              testID="script-input"
+              value={script}
+              onChangeText={setScript}
+              placeholder="Paste your narration script here. Short punchy sentences work best."
+              placeholderTextColor={colors.onSurfaceSecondary}
+              multiline
+              style={[styles.input, { minHeight: 220 }]}
+            />
+          </>
+        )}
+
+        <Text style={styles.section}>STUDIO SETTINGS</Text>
+        <View style={styles.settings}>
+          <SettingRow
+            testID="setting-voice"
+            icon="mic"
+            label="Voice"
+            value={voice?.name || "—"}
+            onPress={() => voiceSheet.current?.present()}
+          />
+          <SettingRow
+            testID="setting-caption"
+            icon="text"
+            label="Captions"
+            value={caption?.name || "—"}
+            dot={caption?.hex}
+            onPress={() => captionSheet.current?.present()}
+          />
+          <SettingRow
+            testID="setting-bg"
+            icon="color-palette"
+            label="Background"
+            value={bg?.name || "—"}
+            swatch={bg?.preview}
+            onPress={() => bgSheet.current?.present()}
+          />
+        </View>
+
+        {!!error && (
+          <View style={styles.errorBox} testID="create-error">
+            <Ionicons name="warning" size={16} color={colors.error} />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
+      </KeyboardAwareScrollView>
+
+      <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
+        <View style={[styles.ctaWrap, { paddingBottom: insets.bottom + spacing.sm }]}>
+          <PrimaryButton
+            testID="generate-reel-button"
+            label="Generate Reel"
+            icon="film"
+            disabled={!canGenerate}
+            loading={submitting}
+            onPress={generate}
+          />
+        </View>
+      </KeyboardStickyView>
+
+      <OptionSheet ref={voiceSheet} title="Pick a voice" options={voiceOptions} selectedId={voiceId} onSelect={(id) => { setVoiceId(id); voiceSheet.current?.dismiss(); }} />
+      <OptionSheet ref={captionSheet} title="Caption style" options={captionOptions} selectedId={captionStyle} onSelect={(id) => { setCaptionStyle(id); captionSheet.current?.dismiss(); }} />
+      <OptionSheet ref={bgSheet} title="Background theme" options={bgOptions} selectedId={bgTheme} onSelect={(id) => { setBgTheme(id); bgSheet.current?.dismiss(); }} />
+    </View>
+  );
+}
+
+function SettingRow({
+  icon,
+  label,
+  value,
+  onPress,
+  dot,
+  swatch,
+  testID,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  value: string;
+  onPress: () => void;
+  dot?: string;
+  swatch?: string[];
+  testID?: string;
+}) {
+  return (
+    <Pressable
+      testID={testID}
+      onPress={() => {
+        haptic.select();
+        onPress();
+      }}
+      style={({ pressed }) => [styles.settingRow, pressed && { backgroundColor: colors.surfaceTertiary }]}
+    >
+      <View style={styles.settingLeft}>
+        <Ionicons name={icon} size={18} color={colors.onSurfaceSecondary} />
+        <Text style={styles.settingLabel}>{label}</Text>
+      </View>
+      <View style={styles.settingRight}>
+        {dot && <View style={[styles.miniDot, { backgroundColor: dot }]} />}
+        {swatch && (
+          <View style={styles.miniSwatchWrap}>
+            {swatch.map((c, i) => (
+              <View key={i} style={[styles.miniSwatch, { backgroundColor: c }]} />
+            ))}
+          </View>
+        )}
+        <Text style={styles.settingValue}>{value}</Text>
+        <Ionicons name="chevron-forward" size={16} color={colors.onSurfaceSecondary} />
+      </View>
+    </Pressable>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.surface },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  brand: { fontFamily: font.display, fontSize: 26, color: colors.onSurface, letterSpacing: 1 },
+  sub: { fontFamily: font.body, fontSize: 12, color: colors.onSurfaceSecondary, marginTop: 2 },
+  logo: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: colors.brandTertiary,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.brandPrimary,
+  },
+  section: {
+    fontFamily: font.bodyBold,
+    fontSize: 11,
+    letterSpacing: 1.2,
+    color: colors.onSurfaceSecondary,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  input: {
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    fontFamily: font.body,
+    fontSize: 15,
+    color: colors.onSurface,
+    textAlignVertical: "top",
+  },
+  chipRow: { flexDirection: "row", gap: spacing.sm },
+  chip: {
+    flex: 1,
+    height: 44,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  chipActive: { borderColor: colors.brand, backgroundColor: colors.brandTertiary },
+  chipText: { fontFamily: font.bodySemi, fontSize: 14, color: colors.onSurfaceSecondary },
+  chipTextActive: { color: colors.onBrandTertiary },
+  scriptHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  wordCount: { fontFamily: font.bodyMed, fontSize: 11, color: colors.onSurfaceSecondary, marginTop: spacing.lg },
+  settings: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+    overflow: "hidden",
+  },
+  settingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+    height: 54,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  settingLeft: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  settingLabel: { fontFamily: font.bodySemi, fontSize: 15, color: colors.onSurface },
+  settingRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  settingValue: { fontFamily: font.bodyMed, fontSize: 14, color: colors.onSurfaceSecondary },
+  miniDot: { width: 12, height: 12, borderRadius: 6 },
+  miniSwatchWrap: { flexDirection: "row", borderRadius: radius.sm, overflow: "hidden" },
+  miniSwatch: { width: 8, height: 16 },
+  errorBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: "rgba(239,68,68,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(239,68,68,0.3)",
+  },
+  errorText: { flex: 1, fontFamily: font.bodyMed, fontSize: 13, color: colors.brandSecondary },
+  ctaWrap: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+});
