@@ -8,7 +8,7 @@ This file is a memory to interact with the user's RevenueCat account via the int
 - entitlement_lookup_key: pro
 - offering_lookup_key: default
 - Packages (package -> product_id, current price):
-  - $rc_monthly -> proddd66b26b4f   ($9.99 / P1M, trial: none)
+  - $rc_monthly -> proddd66b26b4f   ($9.99 / P1M, trial: P1W — 7-day free trial)
   - $rc_annual  -> prod4a33ab21a8   ($79.99 / P1Y, trial: none)
 - Dashboard: https://app.revenuecat.com/projects/proja26f3c2c
 - bundle_id / package_name: com.emergent.mobiledev.swa3k5

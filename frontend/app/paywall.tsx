@@ -126,7 +126,13 @@ export default function PaywallScreen() {
           </View>
         ) : (
           <View style={{ marginTop: spacing.xl }}>
-            {packages.map((pkg) => (
+            {packages.map((pkg) => {
+              const intro = pkg.product.introPrice;
+              const trialLabel =
+                intro && intro.price === 0 && intro.periodNumberOfUnits > 0
+                  ? `${intro.periodNumberOfUnits}-${String(intro.periodUnit || "").toLowerCase() || "day"} free trial, then `
+                  : null;
+              return (
               <Pressable
                 key={pkg.identifier}
                 testID={`plan-${pkg.identifier}`}
@@ -136,13 +142,23 @@ export default function PaywallScreen() {
               >
                 <View style={{ flex: 1 }}>
                   <Text style={styles.planName}>{pkg.product.title || pkg.identifier}</Text>
+                  {!!trialLabel && (
+                    <View style={styles.trialBadge}>
+                      <Ionicons name="gift" size={12} color={colors.brand} />
+                      <Text style={styles.trialTxt}>{trialLabel.trim().replace(/,?\s*then$/, "")}</Text>
+                    </View>
+                  )}
                   {!!pkg.product.description && (
                     <Text style={styles.planDesc} numberOfLines={2}>{pkg.product.description}</Text>
                   )}
                 </View>
-                <Text style={styles.planPrice}>{pkg.product.priceString}</Text>
+                <View style={{ alignItems: "flex-end" }}>
+                  <Text style={styles.planPrice}>{pkg.product.priceString}</Text>
+                  {!!trialLabel && <Text style={styles.planAfter}>after trial</Text>}
+                </View>
               </Pressable>
-            ))}
+              );
+            })}
 
             {!identityReady && (
               <Text testID="paywall-identity-warn" style={styles.warnTxt}>
@@ -181,7 +197,9 @@ export default function PaywallScreen() {
             <Text style={styles.confirmTitle}>Confirm subscription</Text>
             <Text style={styles.confirmBody}>
               {pending
-                ? `Subscribe to ${pending.product.title || "Pro"} for ${pending.product.priceString}?`
+                ? (pending.product.introPrice && pending.product.introPrice.price === 0
+                    ? `Start your ${pending.product.introPrice.periodNumberOfUnits}-${String(pending.product.introPrice.periodUnit || "day").toLowerCase()} free trial, then ${pending.product.priceString}. Cancel anytime.`
+                    : `Subscribe to ${pending.product.title || "Pro"} for ${pending.product.priceString}?`)
                 : ""}
             </Text>
             <View style={styles.confirmRow}>
@@ -227,6 +245,9 @@ const styles = StyleSheet.create({
   planCard: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.lg, borderRadius: radius.lg, borderWidth: 1.5, borderColor: colors.brand, backgroundColor: colors.surfaceSecondary, marginBottom: spacing.md },
   planName: { fontFamily: font.bodyBold, fontSize: 17, color: colors.onSurface },
   planDesc: { fontFamily: font.body, fontSize: 12, color: colors.onSurfaceSecondary, marginTop: 2 },
+  trialBadge: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", marginTop: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.pill, backgroundColor: colors.brandTertiary },
+  trialTxt: { fontFamily: font.bodySemi, fontSize: 11, color: colors.brand },
+  planAfter: { fontFamily: font.body, fontSize: 10, color: colors.onSurfaceSecondary, marginTop: 2 },
   planPrice: { fontFamily: font.display, fontSize: 22, color: colors.brand },
   warnTxt: { fontFamily: font.bodyMed, fontSize: 12, color: colors.onSurfaceSecondary, textAlign: "center", marginBottom: spacing.sm },
   restoreBtn: { height: 48, alignItems: "center", justifyContent: "center", marginTop: spacing.xs },

@@ -18,7 +18,7 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.emergent.mobiledev.swa3k5"
+      "package": "com.ghostreelalpha.app"
     },
     "web": {
       "bundler": "metro",
