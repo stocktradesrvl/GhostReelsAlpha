@@ -6,7 +6,9 @@ export type CaptionStyle = { id: string; name: string; hint: string; hex: string
 export type CaptionPosition = { id: string; name: string };
 export type CaptionSize = { id: string; name: string };
 export type CaptionFont = { id: string; name: string };
+export type CaptionAnim = { id: string; name: string };
 export type BgTheme = { id: string; name: string; preview: string[] };
+export type BgMotion = { id: string; name: string };
 export type MusicTrack = { id: string; name: string };
 export type Config = {
   voices: Voice[];
@@ -15,7 +17,9 @@ export type Config = {
   caption_positions: CaptionPosition[];
   caption_sizes: CaptionSize[];
   caption_fonts: CaptionFont[];
+  caption_anims: CaptionAnim[];
   bg_themes: BgTheme[];
+  bg_motions: BgMotion[];
   music_tracks: MusicTrack[];
 };
 
@@ -36,7 +40,9 @@ export type Reel = {
   caption_position: string;
   caption_size: string;
   caption_font: string;
+  caption_anim: string;
   bg_theme: string;
+  bg_motion: string;
   music_id: string;
   music_volume: number;
   watermark: string | null;
@@ -78,6 +84,11 @@ export const api = {
     }),
   createReel: (payload: Partial<Reel>) =>
     req<Reel>("/reels", { method: "POST", body: JSON.stringify(payload) }),
+  createBatch: (payload: Record<string, any>) =>
+    req<{ created: Reel[]; count: number }>("/reels/batch", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   listReels: () => req<Reel[]>("/reels"),
   getReel: (id: string) => req<Reel>(`/reels/${id}`),
   deleteReel: (id: string) => req<{ ok: boolean }>(`/reels/${id}`, { method: "DELETE" }),

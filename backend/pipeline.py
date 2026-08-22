@@ -14,6 +14,8 @@ from emergentintegrations.llm.openai import OpenAISpeechToText, OpenAITextToSpee
 
 from reels_config import (
     BG_MAP,
+    BG_MOTION_MAP,
+    CAPTION_ANIM_MAP,
     CAPTION_FONT_MAP,
     CAPTION_MAP,
     CAPTION_POSITION_MAP,
@@ -197,13 +199,27 @@ def _fmt_time(t: float) -> str:
 
 def build_ass(words, duration, caption_style: str, out_path: str,
               position: str = "center", size: str = "m", watermark: str = "",
-              hook_text: str = "", caption_font: str = "barlow", endcard_text: str = "") -> None:
+              hook_text: str = "", caption_font: str = "barlow", endcard_text: str = "",
+              caption_anim: str = "pop") -> None:
     color = CAPTION_MAP.get(caption_style, CAPTION_MAP["signal"])["ass_color"]
     pos = CAPTION_POSITION_MAP.get(position, CAPTION_POSITION_MAP["center"])
     sz = CAPTION_SIZE_MAP.get(size, CAPTION_SIZE_MAP["m"])
     fam = CAPTION_FONT_MAP.get(caption_font, CAPTION_FONT_MAP["barlow"])["family"]
+    anim = caption_anim if caption_anim in CAPTION_ANIM_MAP else "pop"
     header = _ass_header(sz["fontsize"], pos["an"], pos["marginv"], fontname=fam)
     lines = [header]
+
+    # Anchor Y for slide animation, derived from alignment + vertical margin.
+    an, mv = pos["an"], pos["marginv"]
+    cap_y = (1920 - mv) if an == 2 else (mv if an == 8 else 960)
+    if anim == "none":
+        intro = "{\\fad(50,40)}"
+    elif anim == "slide":
+        intro = f"{{\\fad(40,30)\\move(540,{cap_y + 70},540,{cap_y},0,160)}}"
+    elif anim == "bounce":
+        intro = "{\\fad(40,20)\\fscx55\\fscy55\\t(0,130,\\fscx113\\fscy113)\\t(130,240,\\fscx100\\fscy100)}"
+    else:  # pop
+        intro = "{\\fad(50,30)\\fscx86\\fscy86\\t(0,110,\\fscx100\\fscy100)}"
 
     wm = _sanitize_watermark(watermark)
     total = max(1.0, float(duration or 1.0))
@@ -261,9 +277,8 @@ def build_ass(words, duration, caption_style: str, out_path: str,
                 else:
                     parts.append(tok)
             text = " ".join(parts)
-            fade = "{\\fad(60,40)}"
             lines.append(
-                f"Dialogue: 0,{_fmt_time(seg_start)},{_fmt_time(seg_end)},Cap,,0,0,0,,{fade}{text}\n"
+                f"Dialogue: 0,{_fmt_time(seg_start)},{_fmt_time(seg_end)},Cap,,0,0,0,,{intro}{text}\n"
             )
 
     Path(out_path).write_text("".join(lines), encoding="utf-8")
@@ -281,14 +296,15 @@ def _sanitize_watermark(text: str) -> str:
 
 async def render_video(audio_path: str, ass_name: str, bg_theme: str, duration: float,
                        workdir: str, out_path: str, music_id: str = "none",
-                       music_volume: float = MUSIC_VOLUME) -> None:
+                       music_volume: float = MUSIC_VOLUME, bg_motion: str = "subtle") -> None:
     theme = BG_MAP.get(bg_theme, BG_MAP["ember"])
     c = theme["colors"]
     dur = max(1.0, float(duration))
+    speed = BG_MOTION_MAP.get(bg_motion, BG_MOTION_MAP["subtle"])["speed"]
 
     grad = (
         f"gradients=s=1080x1920:c0={c[0]}:c1={c[1]}:c2={c[2]}:c3={c[3]}"
-        f":x0=120:y0=120:x1=960:y1=1800:nb_colors=4:seed=7:duration={dur:.2f}:speed=0.006:rate=30"
+        f":x0=120:y0=120:x1=960:y1=1800:nb_colors=4:seed=7:duration={dur:.2f}:speed={speed}:rate=30"
     )
 
     # Video chain: gradient -> captions + optional watermark (both baked into the ASS).

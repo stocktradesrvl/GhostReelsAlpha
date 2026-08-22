@@ -56,6 +56,7 @@ export default function RootLayout() {
             >
               <Stack.Screen name="(tabs)" />
               <Stack.Screen name="reel/[id]" options={{ animation: "slide_from_right" }} />
+              <Stack.Screen name="batch" options={{ animation: "slide_from_right" }} />
             </Stack>
           </BottomSheetModalProvider>
         </KeyboardProvider>

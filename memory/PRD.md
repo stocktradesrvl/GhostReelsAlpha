@@ -62,6 +62,12 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
   ('Duplicate & edit' opens Create pre-filled via `?dup=<id>`); **End Card CTA** (`endcard_text`
   burns a closing card in the final ~1.6s; captions clamp to clear before it). Tested: backend 3/3
   + frontend pass (incl. full duplicate prefill flow).
+- **Follow-up (2026-08 · batch 5): Caption Animations** (`caption_anim`: pop/slide/bounce/none per-word
+  entrances via ASS \t/\move); **Dynamic Backgrounds** (`bg_motion` subtle/dynamic → gradient animation
+  speed so colours visibly shift); **Save Preset** (local brand styles via storage JSON; PresetSheet
+  uses plain TextInput — BottomSheetTextInput crashes on RN-web); **Batch Generate** (`POST /api/reels/batch`
+  turns up to 12 topics into individual reels; dedicated /batch screen). Render-level features verified via
+  synthetic-audio renders (no LLM spend); frontend controls + preset save/apply verified.
 
 ## Backlog
 - P1: multiple caption layout presets; background music track option; ElevenLabs voice option.

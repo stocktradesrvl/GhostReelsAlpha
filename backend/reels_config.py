@@ -73,6 +73,22 @@ CAPTION_FONTS = [
 ]
 CAPTION_FONT_MAP = {f["id"]: f for f in CAPTION_FONTS}
 
+# Caption entrance animation styles.
+CAPTION_ANIMS = [
+    {"id": "pop", "name": "Pop"},
+    {"id": "slide", "name": "Slide"},
+    {"id": "bounce", "name": "Bounce"},
+    {"id": "none", "name": "None"},
+]
+CAPTION_ANIM_MAP = {a["id"]: a for a in CAPTION_ANIMS}
+
+# Background motion -> gradient animation speed (higher = colors shift faster).
+BG_MOTIONS = [
+    {"id": "subtle", "name": "Subtle", "speed": 0.006},
+    {"id": "dynamic", "name": "Dynamic", "speed": 0.035},
+]
+BG_MOTION_MAP = {m["id"]: m for m in BG_MOTIONS}
+
 # Background music beds (CC0). `file` is relative to assets/music; None = silent.
 MUSIC_TRACKS = [
     {"id": "none", "name": "No music", "file": None},

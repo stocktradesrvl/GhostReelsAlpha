@@ -18,7 +18,11 @@ import pipeline
 import storage_client
 from reels_config import (
     BG_MAP,
+    BG_MOTION_MAP,
+    BG_MOTIONS,
     BG_THEMES,
+    CAPTION_ANIM_MAP,
+    CAPTION_ANIMS,
     CAPTION_FONT_MAP,
     CAPTION_FONTS,
     CAPTION_MAP,
@@ -64,11 +68,7 @@ class ScriptRequest(BaseModel):
     seconds: int = 30
 
 
-class CreateReelRequest(BaseModel):
-    title: Optional[str] = None
-    input_mode: str = "topic"          # "topic" | "script"
-    topic: Optional[str] = None
-    script: Optional[str] = None
+class ReelSettings(BaseModel):
     seconds: int = 30
     voice_id: str = "onyx"
     voice_speed: str = "normal"
@@ -76,7 +76,9 @@ class CreateReelRequest(BaseModel):
     caption_position: str = "center"
     caption_size: str = "m"
     caption_font: str = "barlow"
+    caption_anim: str = "pop"
     bg_theme: str = "ember"
+    bg_motion: str = "subtle"
     music_id: str = "none"
     music_volume: float = 0.13
     watermark: Optional[str] = None
@@ -84,12 +86,79 @@ class CreateReelRequest(BaseModel):
     endcard_text: Optional[str] = None
 
 
+class CreateReelRequest(ReelSettings):
+    title: Optional[str] = None
+    input_mode: str = "topic"          # "topic" | "script"
+    topic: Optional[str] = None
+    script: Optional[str] = None
+
+
+class BatchReelRequest(ReelSettings):
+    topics: List[str] = []
+
+
 PUBLIC_FIELDS = {
     "id", "title", "input_mode", "topic", "script", "seconds", "voice_id", "voice_speed",
-    "caption_style", "caption_position", "caption_size", "caption_font", "bg_theme", "music_id",
-    "music_volume", "watermark", "hook_enabled", "endcard_text", "status", "progress",
-    "stage_label", "error", "duration", "word_count", "has_video", "created_at", "updated_at",
+    "caption_style", "caption_position", "caption_size", "caption_font", "caption_anim",
+    "bg_theme", "bg_motion", "music_id", "music_volume", "watermark", "hook_enabled",
+    "endcard_text", "status", "progress", "stage_label", "error",
+    "duration", "word_count", "has_video", "created_at", "updated_at",
 }
+
+
+def validate_settings(s: ReelSettings):
+    checks = [
+        (s.voice_id, VOICE_MAP, "voice"),
+        (s.voice_speed, VOICE_SPEED_MAP, "voice speed"),
+        (s.caption_style, CAPTION_MAP, "caption style"),
+        (s.caption_position, CAPTION_POSITION_MAP, "caption position"),
+        (s.caption_size, CAPTION_SIZE_MAP, "caption size"),
+        (s.caption_font, CAPTION_FONT_MAP, "caption font"),
+        (s.caption_anim, CAPTION_ANIM_MAP, "caption animation"),
+        (s.bg_theme, BG_MAP, "background theme"),
+        (s.bg_motion, BG_MOTION_MAP, "background motion"),
+        (s.music_id, MUSIC_MAP, "music track"),
+    ]
+    for value, table, label in checks:
+        if value not in table:
+            raise HTTPException(400, f"Unknown {label}")
+
+
+def build_reel_doc(s: ReelSettings, input_mode: str, topic, script, title: str) -> dict:
+    reel_id = str(uuid.uuid4())
+    return {
+        "id": reel_id,
+        "title": title,
+        "input_mode": input_mode,
+        "topic": topic,
+        "script": script,
+        "seconds": s.seconds,
+        "voice_id": s.voice_id,
+        "voice_speed": s.voice_speed,
+        "caption_style": s.caption_style,
+        "caption_position": s.caption_position,
+        "caption_size": s.caption_size,
+        "caption_font": s.caption_font,
+        "caption_anim": s.caption_anim,
+        "bg_theme": s.bg_theme,
+        "bg_motion": s.bg_motion,
+        "music_id": s.music_id,
+        "music_volume": max(0.0, min(1.0, float(s.music_volume))),
+        "watermark": (s.watermark or "").strip()[:32] or None,
+        "hook_enabled": bool(s.hook_enabled),
+        "endcard_text": (s.endcard_text or "").strip()[:40] or None,
+        "status": "queued",
+        "progress": 0,
+        "stage_label": "Queued",
+        "error": None,
+        "duration": None,
+        "word_count": len(script.split()) if script else None,
+        "has_video": False,
+        "video_path": None,
+        "thumb_path": None,
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
 
 
 def public_reel(doc: dict) -> dict:
@@ -138,6 +207,7 @@ async def run_pipeline(reel_id: str):
             hook_text=pipeline.hook_line(script) if reel.get("hook_enabled") else "",
             caption_font=reel.get("caption_font", "barlow"),
             endcard_text=reel.get("endcard_text") or "",
+            caption_anim=reel.get("caption_anim", "pop"),
         )
 
         # Stage 4: render
@@ -149,6 +219,7 @@ async def run_pipeline(reel_id: str):
             audio_path, "subs.ass", reel["bg_theme"], duration, workdir, out_path,
             music_id=reel.get("music_id", "none"),
             music_volume=reel.get("music_volume", 0.13),
+            bg_motion=reel.get("bg_motion", "subtle"),
         )
         await pipeline.extract_thumbnail(out_path, thumb_path)
 
@@ -193,7 +264,9 @@ async def get_config():
         "caption_positions": CAPTION_POSITIONS,
         "caption_sizes": CAPTION_SIZES,
         "caption_fonts": CAPTION_FONTS,
+        "caption_anims": CAPTION_ANIMS,
         "bg_themes": BG_THEMES,
+        "bg_motions": BG_MOTIONS,
         "music_tracks": MUSIC_TRACKS,
     }
 
@@ -219,23 +292,7 @@ async def voice_preview(voice_id: str):
 
 @api_router.post("/reels")
 async def create_reel(req: CreateReelRequest):
-    if req.voice_id not in VOICE_MAP:
-        raise HTTPException(400, "Unknown voice")
-    if req.voice_speed not in VOICE_SPEED_MAP:
-        raise HTTPException(400, "Unknown voice speed")
-    if req.caption_style not in CAPTION_MAP:
-        raise HTTPException(400, "Unknown caption style")
-    if req.caption_position not in CAPTION_POSITION_MAP:
-        raise HTTPException(400, "Unknown caption position")
-    if req.caption_size not in CAPTION_SIZE_MAP:
-        raise HTTPException(400, "Unknown caption size")
-    if req.caption_font not in CAPTION_FONT_MAP:
-        raise HTTPException(400, "Unknown caption font")
-    if req.bg_theme not in BG_MAP:
-        raise HTTPException(400, "Unknown background theme")
-    if req.music_id not in MUSIC_MAP:
-        raise HTTPException(400, "Unknown music track")
-
+    validate_settings(req)
     script = (req.script or "").strip() or None
     topic = (req.topic or "").strip() or None
     if req.input_mode == "script" and not script:
@@ -243,46 +300,33 @@ async def create_reel(req: CreateReelRequest):
     if req.input_mode == "topic" and not (topic or script):
         raise HTTPException(400, "Topic is required")
 
-    reel_id = str(uuid.uuid4())
-    title = (req.title or "").strip() or (
-        (script or topic or "Untitled")[:48].strip()
-    )
-    doc = {
-        "id": reel_id,
-        "title": title,
-        "input_mode": req.input_mode,
-        "topic": topic,
-        "script": script,
-        "seconds": req.seconds,
-        "voice_id": req.voice_id,
-        "voice_speed": req.voice_speed,
-        "caption_style": req.caption_style,
-        "caption_position": req.caption_position,
-        "caption_size": req.caption_size,
-        "caption_font": req.caption_font,
-        "bg_theme": req.bg_theme,
-        "music_id": req.music_id,
-        "music_volume": max(0.0, min(1.0, float(req.music_volume))),
-        "watermark": (req.watermark or "").strip()[:32] or None,
-        "hook_enabled": bool(req.hook_enabled),
-        "endcard_text": (req.endcard_text or "").strip()[:40] or None,
-        "status": "queued",
-        "progress": 0,
-        "stage_label": "Queued",
-        "error": None,
-        "duration": None,
-        "word_count": len(script.split()) if script else None,
-        "has_video": False,
-        "video_path": None,
-        "thumb_path": None,
-        "created_at": now_iso(),
-        "updated_at": now_iso(),
-    }
+    title = (req.title or "").strip() or ((script or topic or "Untitled")[:48].strip())
+    doc = build_reel_doc(req, req.input_mode, topic, script, title)
     await db.reels.insert_one(doc)
 
     import asyncio
-    asyncio.create_task(run_pipeline(reel_id))
+    asyncio.create_task(run_pipeline(doc["id"]))
     return public_reel(doc)
+
+
+@api_router.post("/reels/batch")
+async def create_reels_batch(req: BatchReelRequest):
+    validate_settings(req)
+    topics = [t.strip() for t in (req.topics or []) if t.strip()]
+    if not topics:
+        raise HTTPException(400, "At least one topic is required")
+    if len(topics) > 12:
+        raise HTTPException(400, "Up to 12 topics per batch")
+
+    import asyncio
+    created = []
+    for topic in topics:
+        title = topic[:48].strip()
+        doc = build_reel_doc(req, "topic", topic, None, title)
+        await db.reels.insert_one(doc)
+        asyncio.create_task(run_pipeline(doc["id"]))
+        created.append(public_reel(doc))
+    return {"created": created, "count": len(created)}
 
 
 @api_router.get("/reels")

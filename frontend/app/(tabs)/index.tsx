@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, Config } from "@/src/api";
 import { playPreview, stopPreview } from "@/src/audioPreview";
 import OptionSheet, { SheetOption } from "@/src/components/OptionSheet";
+import PresetSheet from "@/src/components/PresetSheet";
 import PrimaryButton from "@/src/components/PrimaryButton";
 import Segmented from "@/src/components/Segmented";
 import { haptic } from "@/src/haptics";
@@ -34,7 +35,9 @@ export default function CreateScreen() {
   const [captionPosition, setCaptionPosition] = useState("center");
   const [captionSize, setCaptionSize] = useState("m");
   const [captionFont, setCaptionFont] = useState("barlow");
+  const [captionAnim, setCaptionAnim] = useState("pop");
   const [bgTheme, setBgTheme] = useState("ember");
+  const [bgMotion, setBgMotion] = useState("subtle");
   const [musicId, setMusicId] = useState("none");
   const [musicVolume, setMusicVolume] = useState(0.13);
   const [watermark, setWatermark] = useState("");
@@ -49,6 +52,34 @@ export default function CreateScreen() {
   const captionSheet = useRef<BottomSheetModal>(null);
   const bgSheet = useRef<BottomSheetModal>(null);
   const musicSheet = useRef<BottomSheetModal>(null);
+  const presetSheet = useRef<BottomSheetModal>(null);
+
+  const currentSettings = {
+    seconds, voice_id: voiceId, voice_speed: voiceSpeed, caption_style: captionStyle,
+    caption_position: captionPosition, caption_size: captionSize, caption_font: captionFont,
+    caption_anim: captionAnim, bg_theme: bgTheme, bg_motion: bgMotion, music_id: musicId,
+    music_volume: musicVolume, watermark, hook_enabled: hookEnabled, endcard_text: endcardText,
+  };
+
+  const applySettings = useCallback((s: Record<string, any>) => {
+    if (s.seconds != null) setSeconds(s.seconds);
+    if (s.voice_id) setVoiceId(s.voice_id);
+    if (s.voice_speed) setVoiceSpeed(s.voice_speed);
+    if (s.caption_style) setCaptionStyle(s.caption_style);
+    if (s.caption_position) setCaptionPosition(s.caption_position);
+    if (s.caption_size) setCaptionSize(s.caption_size);
+    if (s.caption_font) setCaptionFont(s.caption_font);
+    if (s.caption_anim) setCaptionAnim(s.caption_anim);
+    if (s.bg_theme) setBgTheme(s.bg_theme);
+    if (s.bg_motion) setBgMotion(s.bg_motion);
+    if (s.music_id) setMusicId(s.music_id);
+    if (s.music_volume != null) setMusicVolume(s.music_volume);
+    setWatermark(s.watermark || "");
+    setHookEnabled(!!s.hook_enabled);
+    setEndcardText(s.endcard_text || "");
+    haptic.success();
+    presetSheet.current?.dismiss();
+  }, []);
 
   useEffect(() => {
     api.getConfig().then((c) => {
@@ -74,7 +105,9 @@ export default function CreateScreen() {
       setCaptionPosition(r.caption_position);
       setCaptionSize(r.caption_size);
       setCaptionFont(r.caption_font);
+      setCaptionAnim(r.caption_anim);
       setBgTheme(r.bg_theme);
+      setBgMotion(r.bg_motion);
       setMusicId(r.music_id);
       setMusicVolume(r.music_volume);
       setWatermark(r.watermark || "");
@@ -152,7 +185,9 @@ export default function CreateScreen() {
         caption_position: captionPosition,
         caption_size: captionSize,
         caption_font: captionFont,
+        caption_anim: captionAnim,
         bg_theme: bgTheme,
+        bg_motion: bgMotion,
         music_id: musicId,
         music_volume: musicVolume,
         watermark: watermark.trim() || undefined,
@@ -167,7 +202,7 @@ export default function CreateScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [canGenerate, mode, topic, script, seconds, voiceId, voiceSpeed, captionStyle, captionPosition, captionSize, captionFont, bgTheme, musicId, musicVolume, watermark, hookEnabled, endcardText, router]);
+  }, [canGenerate, mode, topic, script, seconds, voiceId, voiceSpeed, captionStyle, captionPosition, captionSize, captionFont, captionAnim, bgTheme, bgMotion, musicId, musicVolume, watermark, hookEnabled, endcardText, router]);
 
   return (
     <View style={styles.root}>
@@ -176,8 +211,18 @@ export default function CreateScreen() {
           <Text style={styles.brand}>FACELESS REELS</Text>
           <Text style={styles.sub}>Topic → script → voice → captions → MP4</Text>
         </View>
-        <View style={styles.logo}>
-          <Ionicons name="flash" size={20} color={colors.brand} />
+        <View style={styles.headerRight}>
+          <Pressable
+            testID="batch-button"
+            onPress={() => { haptic.select(); router.push("/batch"); }}
+            style={styles.batchBtn}
+          >
+            <Ionicons name="layers-outline" size={16} color={colors.onSurface} />
+            <Text style={styles.batchTxt}>Batch</Text>
+          </Pressable>
+          <View style={styles.logo}>
+            <Ionicons name="flash" size={20} color={colors.brand} />
+          </View>
         </View>
       </View>
 
@@ -271,7 +316,17 @@ export default function CreateScreen() {
           </>
         )}
 
-        <Text style={styles.section}>STUDIO SETTINGS</Text>
+        <View style={styles.sectionRow}>
+          <Text style={styles.section}>STUDIO SETTINGS</Text>
+          <Pressable
+            testID="presets-button"
+            onPress={() => { haptic.select(); presetSheet.current?.present(); }}
+            style={styles.presetPill}
+          >
+            <Ionicons name="color-wand" size={14} color={colors.brand} />
+            <Text style={styles.presetPillTxt}>Presets</Text>
+          </Pressable>
+        </View>
         <View style={styles.settings}>
           <SettingRow
             testID="setting-voice"
@@ -358,6 +413,22 @@ export default function CreateScreen() {
           onChange={setCaptionFont}
         />
 
+        <Text style={styles.section}>CAPTION ANIMATION</Text>
+        <ChipSelector
+          testID="caption-anim"
+          options={config?.caption_anims || []}
+          value={captionAnim}
+          onChange={setCaptionAnim}
+        />
+
+        <Text style={styles.section}>BACKGROUND MOTION</Text>
+        <ChipSelector
+          testID="bg-motion"
+          options={config?.bg_motions || []}
+          value={bgMotion}
+          onChange={setBgMotion}
+        />
+
         <View style={styles.toggleRow}>
           <View style={styles.settingLeft}>
             <Ionicons name="flash-outline" size={18} color={colors.onSurfaceSecondary} />
@@ -431,6 +502,7 @@ export default function CreateScreen() {
       <OptionSheet ref={captionSheet} title="Caption style" options={captionOptions} selectedId={captionStyle} onSelect={(id) => { setCaptionStyle(id); captionSheet.current?.dismiss(); }} />
       <OptionSheet ref={bgSheet} title="Background theme" options={bgOptions} selectedId={bgTheme} onSelect={(id) => { setBgTheme(id); bgSheet.current?.dismiss(); }} />
       <OptionSheet ref={musicSheet} title="Background music" options={musicOptions} selectedId={musicId} onSelect={(id) => { setMusicId(id); musicSheet.current?.dismiss(); }} />
+      <PresetSheet ref={presetSheet} currentSettings={currentSettings} onApply={applySettings} />
     </View>
   );
 }
@@ -527,6 +599,33 @@ const styles = StyleSheet.create({
   },
   brand: { fontFamily: font.display, fontSize: 26, color: colors.onSurface, letterSpacing: 1 },
   sub: { fontFamily: font.body, fontSize: 12, color: colors.onSurfaceSecondary, marginTop: 2 },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  batchBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: spacing.md,
+    height: 40,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  batchTxt: { fontFamily: font.bodySemi, fontSize: 13, color: colors.onSurface },
+  sectionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  presetPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.md,
+    height: 30,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.brandPrimary,
+    backgroundColor: colors.brandTertiary,
+  },
+  presetPillTxt: { fontFamily: font.bodySemi, fontSize: 12, color: colors.onBrandTertiary },
   logo: {
     width: 40,
     height: 40,
