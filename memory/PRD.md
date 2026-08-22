@@ -104,6 +104,18 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
     (no LLM/TTS/image credits) so the full render can be tested cheaply. **Must stay `0` in production.** Verified via
     testing agent iteration 7: backend 10/10 + frontend flows green.
 
+- **Follow-up (2026-08 · batch 9 · forked): Per-Scene Redo.** AI-visual reels now persist their intermediate
+  artifacts: voice mp3 (`audio_path`), Whisper word timings (`words`) and per-scene prompts+images
+  (`scenes:[{prompt,image_path}]`) → all stored in object storage / the reel doc. New endpoints:
+  `GET /api/reels/{id}/scenes`, `GET /api/reels/{id}/scene/{i}/image`, `POST /api/reels/{id}/scene/{i}/regenerate`
+  (optional edited `prompt`). `regenerate_scene_task` regenerates just that one image then `recompose_reel` re-renders
+  from stored audio+captions+images (skips script/TTS/Whisper → cheap & fast). Shared `finalize_and_upload` helper
+  (thumb + outro + upload + ready) used by both full pipeline and recompose. Frontend: reel detail shows **Edit scenes**
+  (AI reels only) → new `app/scenes/[id].tsx` editor (per-scene image + editable prompt + Regenerate, live polling,
+  cache-busted image + video refresh). Verified: backend regen→recompose end-to-end (mock) + frontend 100% (iteration 8).
+  NOTE: live "Confirm Live Output" run hit the Universal Key BUDGET CAP — real generation returns the friendly
+  `error_code=budget` message (working as designed); top up credits to see real AI output.
+
 ## Backlog
 - P1: multiple caption layout presets; background music track option; ElevenLabs voice option.
 - P2: multi-aspect export (Reels/Shorts variants); onboarding; brand kit (logo watermark).

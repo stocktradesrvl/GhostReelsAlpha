@@ -258,7 +258,7 @@ export default function ReelDetail() {
       {isReady && (
         <View style={styles.readyWrap}>
           <View style={styles.playerFrame} testID="reel-player">
-            <PreviewPlayer uri={api.videoUrl(id!)} testID="video-view" />
+            <PreviewPlayer uri={`${api.videoUrl(id!)}?t=${encodeURIComponent(reel?.updated_at || "")}`} testID="video-view" />
           </View>
           {toast && (
             <View style={styles.toast} testID="save-toast">
@@ -352,6 +352,16 @@ export default function ReelDetail() {
               onPress={duplicate}
               style={{ marginTop: spacing.sm }}
             />
+            {reel?.visual_mode === "ai" && (
+              <PrimaryButton
+                testID="edit-scenes-button"
+                variant="ghost"
+                label="Edit scenes"
+                icon="images-outline"
+                onPress={() => { haptic.select(); router.push(`/scenes/${id}`); }}
+                style={{ marginTop: spacing.sm }}
+              />
+            )}
             <PrimaryButton
               testID="new-reel-button"
               variant="ghost"

@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 8 (Per-Scene Redo, FRONTEND-ONLY) — end-to-end flow validated on Expo web preview @ 390x844 against EXPO_PUBLIC_BACKEND_URL with REELS_MOCK=1. FULL PASS: (1) Create screen loads; VISUAL STYLE -> AI IMAGES (data-testid=segment-ai) selected and IMAGE STYLE chip row appears (image-style-cinematic default). (2) topic-input filled with 'Three fun facts about octopuses'; generate-reel-button tapped -> router navigates to /reel/{id}. (3) Reel reaches status=ready in ~10.5s under REELS_MOCK=1 (reel-player + video-view render). (4) edit-scenes-button is visible on the ready screen (only for visual_mode='ai') and tapping it navigates to /scenes/{id}. (5) Scenes editor renders 3 scene cards (scene-card-0/1/2), each with an image (Scene 1/2/3 badge), editable prompt TextInput (scene-prompt-{i}) prefilled with the mock prompt ('Mock cinematic vertical scene N for the story'), and a ghost 'Regenerate this scene' button (scene-regen-{i}). scenes-back header button present. (6) Edited scene-prompt-0 to 'A neon octopus glowing in deep dark water, cinematic' and tapped scene-regen-0. (7) scenes-working indicator ('Repainting & re-rendering…' with ActivityIndicator) appeared immediately; image overlay spinner rendered on the affected card only (busyIndex gating works). (8) After ~9s the polling in scenes/[id].tsx picked up status='ready', scenes-working disappeared, image bust query param refreshed, scenes-error was NOT shown, and scene-regen-0 aria-disabled='false' (button re-enabled). (9) scenes-back tapped -> navigated back to /reel/{id} cleanly, no crash/blank. (10) No red screen; only pre-existing web warnings (expo-notifications push token, props.pointerEvents deprecation) — carried over from prior iterations. Test reel 0b3b5129-b62a-41ae-afb3-39750dbb3e82 was cleaned up via DELETE /api/reels/{id} -> {ok:true}.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "props.pointerEvents", "issue": "Pre-existing React 19 warning `props.pointerEvents is deprecated. Use style.pointerEvents` fires on load. Not introduced this iteration. Reference: carried over from iterations 2-7."},
+      {"component": "expo-notifications (web)", "issue": "Pre-existing warning `[expo-notifications] Listening to push token changes is not yet fully supported on web` on load — web-preview limitation, not a Per-Scene Redo issue."}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "scenes/[id].tsx:53-66 poll() reuses api.getReel and calls load() only when status transitions to ready/failed — busyIndex clears via load() and image bust timestamp is refreshed so the new image is fetched (cachePolicy='none' on expo-image reinforces this). Clean.",
+    "scenes/[id].tsx:68-82 regenerate() correctly guards against concurrent triggers via `busyIndex !== null` and immediately flips status='rendering' before firing the API — this makes the workingBar (line 106) show without waiting for the first poll tick. Good UX.",
+    "scenes/[id].tsx:121 sceneImageUrl bust key uses `?t=${bust}` local timestamp — good for forcing image reload after a regenerate; expo-image cachePolicy='none' is set on line 124 as belt-and-suspenders.",
+    "scenes/[id].tsx:117-151 uses PrimaryButton with variant='ghost' + `disabled={working || !editable}` — while ANY scene is regenerating, ALL regen buttons on the page are disabled, which is the intended behaviour to prevent parallel regenerate requests.",
+    "reel/[id].tsx:355-364 edit-scenes-button correctly gated on `reel?.visual_mode === 'ai'` — will not appear for gradient reels. Verified.",
+    "api.ts:139-148 getScenes + regenerateScene + sceneImageUrl are minimal and correctly hit /api/reels/{id}/scenes and /api/reels/{id}/scene/{index}/regenerate. Response type is well-typed.",
+    "No blocking issues, no dead code, no test-only workarounds needed for this feature."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only run this iteration; backend Per-Scene Redo endpoints were already covered by prior batches per handoff note)", "frontend": "100% (10/10 flow steps: AI mode toggle, topic entry, generate, reel ready polling, edit-scenes navigation, 3 scene cards render, prompt edit, regenerate, working indicator, ready recovery, error absence, back nav)"},
+  "seed_data_creation": "Created 1 short-lived AI-visual reel via the UI (id 0b3b5129-b62a-41ae-afb3-39750dbb3e82) and cleaned it up via DELETE /api/reels/{id} at the end of the run. No orphaned data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Per-Scene Redo frontend flow is 100% functional under REELS_MOCK=1. Key testIDs confirmed working: segment-ai (VISUAL STYLE = AI IMAGES), topic-input, generate-reel-button, reel-player (ready-state marker on /reel/{id}), edit-scenes-button (gated on visual_mode='ai'), scene-card-{index}, scene-prompt-{index}, scene-regen-{index}, scenes-working (repaint indicator), scenes-error (absent on success), scenes-back. Under REELS_MOCK=1 the pipeline completes in ~10-11s and a per-scene regen finishes in ~7-9s. Solid-color scene images are expected — do not treat visual similarity between original and regenerated images as a bug. If you extend this test, note that ALL scene-regen buttons are simultaneously disabled while `working` is true — this is intentional (prevents concurrent regen requests).",
+  "rca_of_issue": "N/A — no issues to root-cause. Feature works as designed."
+}

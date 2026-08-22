@@ -144,6 +144,10 @@ class EpisodeRequest(BaseModel):
     topic: Optional[str] = None
 
 
+class SceneRegenRequest(BaseModel):
+    prompt: Optional[str] = None
+
+
 PUBLIC_FIELDS = {
     "id", "title", "input_mode", "topic", "script", "series_id", "episode_number", "seconds", "visual_mode", "image_style", "voice_id", "voice_speed",
     "caption_style", "caption_position", "caption_size", "caption_font", "caption_anim",
@@ -228,6 +232,9 @@ def build_reel_doc(s: ReelSettings, input_mode: str, topic, script, title: str,
         "has_video": False,
         "video_path": None,
         "thumb_path": None,
+        "audio_path": None,
+        "words": None,
+        "scenes": None,
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
@@ -282,12 +289,17 @@ async def run_pipeline(reel_id: str):
         audio_path = os.path.join(workdir, "voice.mp3")
         speed = VOICE_SPEED_MAP.get(reel.get("voice_speed", "normal"), VOICE_SPEED_MAP["normal"])["speed"]
         await pipeline.synth_voice(script, reel["voice_id"], audio_path, speed=speed)
+        # Persist the voice track so scenes/captions can be re-rendered without re-voicing.
+        with open(audio_path, "rb") as f:
+            apath = f"{storage_client.APP_NAME}/reels/{reel_id}/voice.mp3"
+            await run_in_threadpool(storage_client.put_object, apath, f.read(), "audio/mpeg")
 
         # Stage 3: captions
         await update_reel(reel_id, status="captioning", progress=55, stage_label="Aligning captions")
         words, duration = await pipeline.transcribe_words(audio_path)
         if not duration or duration <= 0:
             duration = max(3.0, len(script.split()) / pipeline.WORDS_PER_SEC)
+        await update_reel(reel_id, audio_path=apath, words=words, duration=round(duration, 2))
         ass_path = os.path.join(workdir, "subs.ass")
         pipeline.build_ass(
             words, duration, reel["caption_style"], ass_path,
@@ -311,6 +323,14 @@ async def run_pipeline(reel_id: str):
             prompts = await pipeline.generate_scene_prompts(script, n, character_bible=bible)
             style_suffix = IMAGE_STYLE_MAP.get(reel.get("image_style", "cinematic"), IMAGE_STYLE_MAP["cinematic"])["suffix"]
             images = await pipeline.generate_images(prompts, workdir, style_suffix=style_suffix, character_bible=bible)
+            # Persist prompts + images so a single scene can be regenerated later.
+            scenes = []
+            for i, (p, img) in enumerate(zip(prompts, images)):
+                spath = f"{storage_client.APP_NAME}/reels/{reel_id}/scene_{i}.png"
+                with open(img, "rb") as f:
+                    await run_in_threadpool(storage_client.put_object, spath, f.read(), "image/png")
+                scenes.append({"prompt": p, "image_path": spath})
+            await update_reel(reel_id, scenes=scenes)
             await update_reel(reel_id, status="rendering", progress=82, stage_label="Rendering video")
             await pipeline.render_video_images(
                 audio_path, "subs.ass", images, duration, workdir, out_path,
@@ -328,37 +348,7 @@ async def run_pipeline(reel_id: str):
                 custom_colors=[reel.get("custom_c1"), reel.get("custom_c2")],
             )
         await pipeline.extract_thumbnail(out_path, thumb_path)
-
-        # Optional custom outro appended to the finished video.
-        outro_id = reel.get("outro_id")
-        if outro_id:
-            outro_doc = await db.outros.find_one({"id": outro_id})
-            if outro_doc and outro_doc.get("storage_path"):
-                await update_reel(reel_id, stage_label="Adding outro")
-                local_outro = os.path.join(workdir, "outro.mp4")
-                content, _ = await run_in_threadpool(storage_client.get_object, outro_doc["storage_path"])
-                with open(local_outro, "wb") as f:
-                    f.write(content)
-                final_path = os.path.join(workdir, "final.mp4")
-                await pipeline.append_outro(out_path, local_outro, final_path)
-                shutil.move(final_path, out_path)
-
-        # Stage 5: upload to durable object storage
-        await update_reel(reel_id, status="uploading", progress=92, stage_label="Finishing up")
-        with open(out_path, "rb") as f:
-            video_bytes = f.read()
-        vpath = f"{storage_client.APP_NAME}/reels/{reel_id}.mp4"
-        await run_in_threadpool(storage_client.put_object, vpath, video_bytes, "video/mp4")
-        tpath = None
-        if os.path.exists(thumb_path):
-            with open(thumb_path, "rb") as f:
-                tpath = f"{storage_client.APP_NAME}/reels/{reel_id}.jpg"
-                await run_in_threadpool(storage_client.put_object, tpath, f.read(), "image/jpeg")
-
-        await update_reel(
-            reel_id, status="ready", progress=100, stage_label="Ready",
-            has_video=True, video_path=vpath, thumb_path=tpath, error=None,
-        )
+        await finalize_and_upload(reel, reel_id, workdir, out_path, thumb_path, duration)
         logger.info("Reel %s ready (%.1fs)", reel_id, duration)
     except Exception as e:  # noqa: BLE001
         logger.exception("Pipeline failed for %s", reel_id)
@@ -367,6 +357,133 @@ async def run_pipeline(reel_id: str):
                           error=friendly, error_code=code)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
+
+
+async def finalize_and_upload(reel, reel_id, workdir, out_path, thumb_path, duration):
+    """Append optional outro, then upload video + thumb to durable storage and mark ready."""
+    outro_id = reel.get("outro_id")
+    if outro_id:
+        outro_doc = await db.outros.find_one({"id": outro_id})
+        if outro_doc and outro_doc.get("storage_path"):
+            await update_reel(reel_id, stage_label="Adding outro")
+            local_outro = os.path.join(workdir, "outro.mp4")
+            content, _ = await run_in_threadpool(storage_client.get_object, outro_doc["storage_path"])
+            with open(local_outro, "wb") as f:
+                f.write(content)
+            final_path = os.path.join(workdir, "final.mp4")
+            await pipeline.append_outro(out_path, local_outro, final_path)
+            shutil.move(final_path, out_path)
+
+    await update_reel(reel_id, status="uploading", progress=92, stage_label="Finishing up")
+    with open(out_path, "rb") as f:
+        video_bytes = f.read()
+    vpath = f"{storage_client.APP_NAME}/reels/{reel_id}.mp4"
+    await run_in_threadpool(storage_client.put_object, vpath, video_bytes, "video/mp4")
+    tpath = None
+    if os.path.exists(thumb_path):
+        with open(thumb_path, "rb") as f:
+            tpath = f"{storage_client.APP_NAME}/reels/{reel_id}.jpg"
+            await run_in_threadpool(storage_client.put_object, tpath, f.read(), "image/jpeg")
+    await update_reel(
+        reel_id, status="ready", progress=100, stage_label="Ready",
+        has_video=True, video_path=vpath, thumb_path=tpath, error=None, error_code=None,
+    )
+
+
+async def recompose_reel(reel_id: str):
+    """Re-render an AI reel from stored voice + word timings + scene images (no re-voicing)."""
+    workdir = pipeline.new_workdir()
+    try:
+        reel = await db.reels.find_one({"id": reel_id})
+        if not reel or not reel.get("audio_path") or not reel.get("scenes"):
+            await update_reel(reel_id, status="failed", stage_label="Re-render failed",
+                              error="This reel can't be re-rendered.", error_code="generic")
+            return
+        await update_reel(reel_id, status="rendering", progress=70, stage_label="Re-rendering",
+                          error=None, error_code=None)
+
+        audio_path = os.path.join(workdir, "voice.mp3")
+        content, _ = await run_in_threadpool(storage_client.get_object, reel["audio_path"])
+        with open(audio_path, "wb") as f:
+            f.write(content)
+
+        words = reel.get("words") or []
+        duration = float(reel.get("duration") or max(3.0, len(words) * 0.4))
+        ass_path = os.path.join(workdir, "subs.ass")
+        pipeline.build_ass(
+            words, duration, reel["caption_style"], ass_path,
+            position=reel.get("caption_position", "center"),
+            size=reel.get("caption_size", "m"),
+            watermark=reel.get("watermark") or "",
+            hook_text=pipeline.hook_line(reel.get("script") or "") if reel.get("hook_enabled") else "",
+            caption_font=reel.get("caption_font", "barlow"),
+            endcard_text=reel.get("endcard_text") or "",
+            caption_anim=reel.get("caption_anim", "pop"),
+        )
+
+        images = []
+        for i, s in enumerate(reel["scenes"]):
+            ip = os.path.join(workdir, f"scene_{i}.png")
+            content, _ = await run_in_threadpool(storage_client.get_object, s["image_path"])
+            with open(ip, "wb") as f:
+                f.write(content)
+            images.append(ip)
+
+        out_path = str(MEDIA_DIR / f"{reel_id}.mp4")
+        thumb_path = str(MEDIA_DIR / f"{reel_id}.jpg")
+        await pipeline.render_video_images(
+            audio_path, "subs.ass", images, duration, workdir, out_path,
+            music_id=reel.get("music_id", "none"),
+            music_volume=reel.get("music_volume", 0.13),
+        )
+        await pipeline.extract_thumbnail(out_path, thumb_path)
+        await finalize_and_upload(reel, reel_id, workdir, out_path, thumb_path, duration)
+        logger.info("Reel %s recomposed", reel_id)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Recompose failed for %s", reel_id)
+        code, friendly = classify_error(e)
+        await update_reel(reel_id, status="failed", stage_label="Re-render failed",
+                          error=friendly, error_code=code)
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+async def regenerate_scene_task(reel_id: str, index: int, prompt: str = None):
+    """Regenerate a single scene image, then recompose the reel."""
+    workdir = pipeline.new_workdir()
+    try:
+        reel = await db.reels.find_one({"id": reel_id})
+        scenes = list(reel.get("scenes") or [])
+        if index < 0 or index >= len(scenes):
+            return
+        await update_reel(reel_id, status="rendering", progress=40, stage_label="Repainting scene",
+                          error=None, error_code=None)
+        if prompt and prompt.strip():
+            scenes[index]["prompt"] = prompt.strip()[:400]
+
+        series = await db.series.find_one({"id": reel["series_id"]}) if reel.get("series_id") else None
+        bible = pipeline.character_bible_text(series) if series else ""
+        style_suffix = IMAGE_STYLE_MAP.get(reel.get("image_style", "cinematic"), IMAGE_STYLE_MAP["cinematic"])["suffix"]
+        new_imgs = await pipeline.generate_images([scenes[index]["prompt"]], workdir,
+                                                  style_suffix=style_suffix, character_bible=bible)
+        spath = scenes[index]["image_path"]
+        with open(new_imgs[0], "rb") as f:
+            await run_in_threadpool(storage_client.put_object, spath, f.read(), "image/png")
+        # bust local cache of the scene image so the editor shows the new art
+        local_scene = MEDIA_DIR / f"scene_{reel_id}_{index}.png"
+        if local_scene.exists():
+            local_scene.unlink(missing_ok=True)
+        await update_reel(reel_id, scenes=scenes)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Scene regen failed for %s[%s]", reel_id, index)
+        code, friendly = classify_error(e)
+        await update_reel(reel_id, status="failed", stage_label="Re-render failed",
+                          error=friendly, error_code=code)
+        shutil.rmtree(workdir, ignore_errors=True)
+        return
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+    await recompose_reel(reel_id)
 
 
 # ---------------------------------------------------------------------------
@@ -675,6 +792,58 @@ async def get_outro_video(outro_id: str):
         content, _ = await run_in_threadpool(storage_client.get_object, doc["storage_path"])
         local.write_bytes(content)
     return FileResponse(str(local), media_type="video/mp4")
+
+
+@api_router.get("/reels/{reel_id}/scenes")
+async def get_scenes(reel_id: str):
+    doc = await db.reels.find_one({"id": reel_id})
+    if not doc:
+        raise HTTPException(404, "Reel not found")
+    scenes = doc.get("scenes") or []
+    editable = bool(doc.get("visual_mode") == "ai" and doc.get("audio_path") and scenes)
+    return {
+        "editable": editable,
+        "status": doc.get("status"),
+        "scenes": [
+            {"index": i, "prompt": s.get("prompt", ""),
+             "image_url": f"/api/reels/{reel_id}/scene/{i}/image"}
+            for i, s in enumerate(scenes)
+        ],
+    }
+
+
+@api_router.get("/reels/{reel_id}/scene/{index}/image")
+async def get_scene_image(reel_id: str, index: int):
+    doc = await db.reels.find_one({"id": reel_id})
+    scenes = (doc or {}).get("scenes") or []
+    if not doc or index < 0 or index >= len(scenes):
+        raise HTTPException(404, "Scene not found")
+    local = MEDIA_DIR / f"scene_{reel_id}_{index}.png"
+    if not local.exists():
+        content, _ = await run_in_threadpool(storage_client.get_object, scenes[index]["image_path"])
+        local.write_bytes(content)
+    return FileResponse(str(local), media_type="image/png",
+                        headers={"Cache-Control": "no-store"})
+
+
+@api_router.post("/reels/{reel_id}/scene/{index}/regenerate")
+async def regenerate_scene(reel_id: str, index: int, req: SceneRegenRequest):
+    doc = await db.reels.find_one({"id": reel_id})
+    if not doc:
+        raise HTTPException(404, "Reel not found")
+    scenes = doc.get("scenes") or []
+    if doc.get("visual_mode") != "ai" or not doc.get("audio_path") or not scenes:
+        raise HTTPException(400, "This reel doesn't support scene editing")
+    if index < 0 or index >= len(scenes):
+        raise HTTPException(404, "Scene not found")
+    if doc.get("status") not in ("ready", "failed"):
+        raise HTTPException(409, "Reel is still processing")
+
+    await update_reel(reel_id, status="rendering", progress=35, stage_label="Repainting scene",
+                      error=None, error_code=None)
+    import asyncio
+    asyncio.create_task(regenerate_scene_task(reel_id, index, req.prompt))
+    return public_reel(await db.reels.find_one({"id": reel_id}))
 
 
 app.include_router(api_router)

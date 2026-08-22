@@ -59,6 +59,7 @@ export default function RootLayout() {
               <Stack.Screen name="batch" options={{ animation: "slide_from_right" }} />
               <Stack.Screen name="series/new" options={{ animation: "slide_from_right" }} />
               <Stack.Screen name="series/[id]" options={{ animation: "slide_from_right" }} />
+              <Stack.Screen name="scenes/[id]" options={{ animation: "slide_from_right" }} />
             </Stack>
           </BottomSheetModalProvider>
         </KeyboardProvider>

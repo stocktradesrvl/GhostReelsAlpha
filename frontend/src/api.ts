@@ -136,6 +136,16 @@ export const api = {
       body: JSON.stringify({ topic: topic || null }),
     }),
   deleteSeries: (id: string) => req<{ ok: boolean }>(`/series/${id}`, { method: "DELETE" }),
+  getScenes: (id: string) =>
+    req<{ editable: boolean; status: string; scenes: { index: number; prompt: string; image_url: string }[] }>(
+      `/reels/${id}/scenes`,
+    ),
+  regenerateScene: (id: string, index: number, prompt?: string) =>
+    req<Reel>(`/reels/${id}/scene/${index}/regenerate`, {
+      method: "POST",
+      body: JSON.stringify({ prompt: prompt || null }),
+    }),
+  sceneImageUrl: (id: string, index: number) => `${BASE}/reels/${id}/scene/${index}/image`,
   listOutros: () => req<Outro[]>("/outros"),
   deleteOutro: (id: string) => req<{ ok: boolean }>(`/outros/${id}`, { method: "DELETE" }),
   outroVideoUrl: (id: string) => `${BASE}/outros/${id}/video`,
