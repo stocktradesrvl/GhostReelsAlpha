@@ -1357,6 +1357,15 @@ async def terms_of_service():
     return HTMLResponse(content=TERMS_OF_SERVICE_HTML)
 
 
+@api_router.get("/appstore-screenshots.zip")
+async def appstore_screenshots_zip():
+    """One-off download of the generated App Store screenshot sets (6.7\" + 6.5\")."""
+    f = Path("/app/frontend/appstore-screenshots.zip")
+    if not f.is_file():
+        raise HTTPException(404, "not available")
+    return FileResponse(str(f), media_type="application/zip", filename="ghostreelsalpha-appstore-screenshots.zip")
+
+
 @api_router.get("/settings")
 async def get_settings(user=Depends(current_user)):
     return public_user(user)
