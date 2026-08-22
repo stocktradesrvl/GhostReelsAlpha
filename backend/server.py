@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import shutil
 import uuid
 from datetime import datetime, timezone
@@ -7,7 +8,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
@@ -31,6 +32,8 @@ from reels_config import (
     CAPTION_SIZE_MAP,
     CAPTION_SIZES,
     CAPTION_STYLES,
+    IMAGE_STYLE_MAP,
+    IMAGE_STYLES,
     MUSIC_MAP,
     MUSIC_TRACKS,
     VOICE_MAP,
@@ -60,6 +63,22 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def classify_error(exc) -> tuple:
+    """Map raw pipeline exceptions to (error_code, friendly_message)."""
+    msg = str(exc) or ""
+    if re.search(r"budget|exceeded|insufficient|quota|credit", msg, re.I):
+        return "budget", (
+            "You're out of AI credits. Top up your Universal Key "
+            "(Profile → Manage plan → Universal Key → Add Balance), then try again."
+        )
+    if re.search(r"objstore|storage|50\d\s+server error", msg, re.I):
+        return "storage", (
+            "Couldn't save your video to cloud storage just now. "
+            "Please tap Try again in a moment."
+        )
+    return "generic", (msg[:300] or "Something went wrong while generating your reel.")
+
+
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
@@ -71,6 +90,7 @@ class ScriptRequest(BaseModel):
 class ReelSettings(BaseModel):
     seconds: int = 30
     visual_mode: str = "gradient"       # "gradient" | "ai"
+    image_style: str = "cinematic"
     voice_id: str = "onyx"
     voice_speed: str = "normal"
     caption_style: str = "signal"
@@ -87,6 +107,7 @@ class ReelSettings(BaseModel):
     endcard_text: Optional[str] = None
     custom_c1: Optional[str] = None
     custom_c2: Optional[str] = None
+    outro_id: Optional[str] = None
 
 
 class CreateReelRequest(ReelSettings):
@@ -101,13 +122,40 @@ class BatchReelRequest(ReelSettings):
     scheduled_at: Optional[str] = None  # ISO time; if future, reels wait until then
 
 
+class Character(BaseModel):
+    name: str = ""
+    description: str = ""
+
+
+class SeriesCreate(ReelSettings):
+    title: str
+    premise: str = ""
+    tone: str = ""
+    characters: List[Character] = []
+
+
+class SuggestRequest(BaseModel):
+    premise: str
+    tone: str = ""
+    count: int = 3
+
+
+class EpisodeRequest(BaseModel):
+    topic: Optional[str] = None
+
+
 PUBLIC_FIELDS = {
-    "id", "title", "input_mode", "topic", "script", "seconds", "visual_mode", "voice_id", "voice_speed",
+    "id", "title", "input_mode", "topic", "script", "series_id", "episode_number", "seconds", "visual_mode", "image_style", "voice_id", "voice_speed",
     "caption_style", "caption_position", "caption_size", "caption_font", "caption_anim",
     "bg_theme", "bg_motion", "custom_c1", "custom_c2", "music_id", "music_volume", "watermark",
-    "hook_enabled", "endcard_text", "views", "downloads", "scheduled_at",
-    "status", "progress", "stage_label", "error",
+    "hook_enabled", "endcard_text", "outro_id", "views", "downloads", "scheduled_at",
+    "status", "progress", "stage_label", "error", "error_code",
     "duration", "word_count", "has_video", "created_at", "updated_at",
+}
+
+SERIES_PUBLIC_FIELDS = {
+    "id", "title", "premise", "tone", "characters", "settings",
+    "episode_count", "created_at", "updated_at",
 }
 
 
@@ -136,7 +184,8 @@ def validate_settings(s: ReelSettings):
             raise HTTPException(400, "Custom theme needs two hex colours")
 
 
-def build_reel_doc(s: ReelSettings, input_mode: str, topic, script, title: str) -> dict:
+def build_reel_doc(s: ReelSettings, input_mode: str, topic, script, title: str,
+                   series_id: str = None, episode_number: int = None) -> dict:
     reel_id = str(uuid.uuid4())
     return {
         "id": reel_id,
@@ -144,8 +193,11 @@ def build_reel_doc(s: ReelSettings, input_mode: str, topic, script, title: str) 
         "input_mode": input_mode,
         "topic": topic,
         "script": script,
+        "series_id": series_id,
+        "episode_number": episode_number,
         "seconds": s.seconds,
         "visual_mode": s.visual_mode if s.visual_mode in ("gradient", "ai") else "gradient",
+        "image_style": s.image_style if s.image_style in IMAGE_STYLE_MAP else "cinematic",
         "voice_id": s.voice_id,
         "voice_speed": s.voice_speed,
         "caption_style": s.caption_style,
@@ -157,6 +209,7 @@ def build_reel_doc(s: ReelSettings, input_mode: str, topic, script, title: str) 
         "bg_motion": s.bg_motion,
         "custom_c1": (s.custom_c1 or None),
         "custom_c2": (s.custom_c2 or None),
+        "outro_id": (s.outro_id or None),
         "music_id": s.music_id,
         "music_volume": max(0.0, min(1.0, float(s.music_volume))),
         "watermark": (s.watermark or "").strip()[:32] or None,
@@ -169,6 +222,7 @@ def build_reel_doc(s: ReelSettings, input_mode: str, topic, script, title: str) 
         "progress": 0,
         "stage_label": "Queued",
         "error": None,
+        "error_code": None,
         "duration": None,
         "word_count": len(script.split()) if script else None,
         "has_video": False,
@@ -181,6 +235,10 @@ def build_reel_doc(s: ReelSettings, input_mode: str, topic, script, title: str) 
 
 def public_reel(doc: dict) -> dict:
     return {k: doc.get(k) for k in PUBLIC_FIELDS}
+
+
+def public_series(doc: dict) -> dict:
+    return {k: doc.get(k) for k in SERIES_PUBLIC_FIELDS}
 
 
 async def update_reel(reel_id: str, **fields):
@@ -198,11 +256,25 @@ async def run_pipeline(reel_id: str):
         if not reel:
             return
 
+        series = None
+        if reel.get("series_id"):
+            series = await db.series.find_one({"id": reel["series_id"]})
+
         script = reel.get("script")
         # Stage 1: script (topic mode without a script yet)
         if not script:
             await update_reel(reel_id, status="scripting", progress=10, stage_label="Writing script")
-            script = await pipeline.generate_script(reel["topic"], reel.get("seconds", 30))
+            if series:
+                prior = await db.reels.find({
+                    "series_id": series["id"], "status": "ready",
+                    "episode_number": {"$lt": reel.get("episode_number", 1)},
+                }).sort("episode_number", 1).to_list(20)
+                prior_scripts = [p.get("script") for p in prior if p.get("script")]
+                script = await pipeline.generate_series_script(
+                    series, prior_scripts, reel.get("topic"), reel.get("seconds", 30)
+                )
+            else:
+                script = await pipeline.generate_script(reel["topic"], reel.get("seconds", 30))
             await update_reel(reel_id, script=script, word_count=len(script.split()))
 
         # Stage 2: voiceover
@@ -234,9 +306,11 @@ async def run_pipeline(reel_id: str):
         if reel.get("visual_mode") == "ai":
             await update_reel(reel_id, status="rendering", progress=66,
                               stage_label="Painting visuals", duration=round(duration, 2))
+            bible = pipeline.character_bible_text(series) if series else ""
             n = pipeline.scene_count(reel.get("seconds", 30))
-            prompts = await pipeline.generate_scene_prompts(script, n)
-            images = await pipeline.generate_images(prompts, workdir)
+            prompts = await pipeline.generate_scene_prompts(script, n, character_bible=bible)
+            style_suffix = IMAGE_STYLE_MAP.get(reel.get("image_style", "cinematic"), IMAGE_STYLE_MAP["cinematic"])["suffix"]
+            images = await pipeline.generate_images(prompts, workdir, style_suffix=style_suffix, character_bible=bible)
             await update_reel(reel_id, status="rendering", progress=82, stage_label="Rendering video")
             await pipeline.render_video_images(
                 audio_path, "subs.ass", images, duration, workdir, out_path,
@@ -254,6 +328,20 @@ async def run_pipeline(reel_id: str):
                 custom_colors=[reel.get("custom_c1"), reel.get("custom_c2")],
             )
         await pipeline.extract_thumbnail(out_path, thumb_path)
+
+        # Optional custom outro appended to the finished video.
+        outro_id = reel.get("outro_id")
+        if outro_id:
+            outro_doc = await db.outros.find_one({"id": outro_id})
+            if outro_doc and outro_doc.get("storage_path"):
+                await update_reel(reel_id, stage_label="Adding outro")
+                local_outro = os.path.join(workdir, "outro.mp4")
+                content, _ = await run_in_threadpool(storage_client.get_object, outro_doc["storage_path"])
+                with open(local_outro, "wb") as f:
+                    f.write(content)
+                final_path = os.path.join(workdir, "final.mp4")
+                await pipeline.append_outro(out_path, local_outro, final_path)
+                shutil.move(final_path, out_path)
 
         # Stage 5: upload to durable object storage
         await update_reel(reel_id, status="uploading", progress=92, stage_label="Finishing up")
@@ -274,7 +362,9 @@ async def run_pipeline(reel_id: str):
         logger.info("Reel %s ready (%.1fs)", reel_id, duration)
     except Exception as e:  # noqa: BLE001
         logger.exception("Pipeline failed for %s", reel_id)
-        await update_reel(reel_id, status="failed", stage_label="Generation failed", error=str(e)[:400])
+        code, friendly = classify_error(e)
+        await update_reel(reel_id, status="failed", stage_label="Generation failed",
+                          error=friendly, error_code=code)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
@@ -292,6 +382,7 @@ async def get_config():
     return {
         "voices": VOICES,
         "voice_speeds": VOICE_SPEEDS,
+        "image_styles": IMAGE_STYLES,
         "caption_styles": CAPTION_STYLES,
         "caption_positions": CAPTION_POSITIONS,
         "caption_sizes": CAPTION_SIZES,
@@ -307,7 +398,11 @@ async def get_config():
 async def make_script(req: ScriptRequest):
     if not req.topic.strip():
         raise HTTPException(400, "Topic is required")
-    script = await pipeline.generate_script(req.topic.strip(), req.seconds)
+    try:
+        script = await pipeline.generate_script(req.topic.strip(), req.seconds)
+    except Exception as e:  # noqa: BLE001
+        code, friendly = classify_error(e)
+        raise HTTPException(402 if code == "budget" else 500, friendly)
     return {"script": script, "word_count": len(script.split())}
 
 
@@ -445,6 +540,141 @@ async def get_video(reel_id: str):
 async def get_thumb(reel_id: str):
     local = await _ensure_local(reel_id, "jpg", "thumb_path", "image/jpeg")
     return FileResponse(str(local), media_type="image/jpeg")
+
+
+@api_router.post("/series")
+async def create_series(req: SeriesCreate):
+    validate_settings(req)
+    if not req.title.strip():
+        raise HTTPException(400, "Series title is required")
+    settings = {k: getattr(req, k) for k in ReelSettings.model_fields}
+    doc = {
+        "id": str(uuid.uuid4()),
+        "title": req.title.strip()[:80],
+        "premise": (req.premise or "").strip()[:1200],
+        "tone": (req.tone or "").strip()[:120],
+        "characters": [c.model_dump() for c in req.characters][:8],
+        "settings": settings,
+        "episode_count": 0,
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    await db.series.insert_one(doc)
+    return public_series(doc)
+
+
+@api_router.post("/series/suggest")
+async def suggest_series_characters(req: SuggestRequest):
+    if not req.premise.strip():
+        raise HTTPException(400, "Premise is required")
+    try:
+        chars = await pipeline.suggest_characters(req.premise.strip(), req.tone.strip(), req.count)
+    except Exception as e:  # noqa: BLE001
+        code, friendly = classify_error(e)
+        raise HTTPException(402 if code == "budget" else 500, friendly)
+    return {"characters": chars}
+
+
+@api_router.get("/series")
+async def list_series():
+    docs = await db.series.find().sort("created_at", -1).to_list(100)
+    return [public_series(d) for d in docs]
+
+
+@api_router.get("/series/{series_id}")
+async def get_series(series_id: str):
+    doc = await db.series.find_one({"id": series_id})
+    if not doc:
+        raise HTTPException(404, "Series not found")
+    reels = await db.reels.find({"series_id": series_id}).sort("episode_number", 1).to_list(200)
+    return {"series": public_series(doc), "episodes": [public_reel(r) for r in reels]}
+
+
+@api_router.delete("/series/{series_id}")
+async def delete_series(series_id: str):
+    doc = await db.series.find_one({"id": series_id})
+    if not doc:
+        raise HTTPException(404, "Series not found")
+    await db.series.delete_one({"id": series_id})
+    return {"ok": True}
+
+
+@api_router.post("/series/{series_id}/episode")
+async def create_series_episode(series_id: str, req: EpisodeRequest):
+    series = await db.series.find_one({"id": series_id})
+    if not series:
+        raise HTTPException(404, "Series not found")
+    s = ReelSettings(**(series.get("settings") or {}))
+    ep = int(series.get("episode_count", 0)) + 1
+    topic = (req.topic or "").strip() or None
+    title = f"{series['title']} — Ep {ep}"
+    display_topic = topic or (series.get("premise") or series["title"])[:60]
+    doc = build_reel_doc(s, "topic", display_topic, None, title,
+                         series_id=series_id, episode_number=ep)
+    # keep the raw user topic (None -> AI continues the story on its own)
+    doc["topic"] = topic
+    await db.reels.insert_one(doc)
+    await db.series.update_one({"id": series_id},
+                               {"$set": {"episode_count": ep, "updated_at": now_iso()}})
+
+    import asyncio
+    asyncio.create_task(run_pipeline(doc["id"]))
+    return public_reel(doc)
+
+
+@api_router.post("/outros")
+async def upload_outro(file: UploadFile = File(...), name: str = Form(None)):
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Empty file")
+    if len(data) > 40 * 1024 * 1024:
+        raise HTTPException(413, "Outro clip must be under 40 MB")
+    ct = (file.content_type or "").lower()
+    if not (ct.startswith("video/") or (file.filename or "").lower().endswith((".mp4", ".mov", ".m4v"))):
+        raise HTTPException(415, "Please upload a video clip (MP4/MOV)")
+
+    outro_id = str(uuid.uuid4())
+    storage_path = f"{storage_client.APP_NAME}/outros/{outro_id}.mp4"
+    await run_in_threadpool(storage_client.put_object, storage_path, data, "video/mp4")
+    doc = {
+        "id": outro_id,
+        "name": (name or file.filename or "Outro clip")[:60],
+        "storage_path": storage_path,
+        "size": len(data),
+        "created_at": now_iso(),
+    }
+    await db.outros.insert_one(doc)
+    return {k: doc[k] for k in ("id", "name", "size", "created_at")}
+
+
+@api_router.get("/outros")
+async def list_outros():
+    docs = await db.outros.find().sort("created_at", -1).to_list(100)
+    return [{k: d.get(k) for k in ("id", "name", "size", "created_at")} for d in docs]
+
+
+@api_router.delete("/outros/{outro_id}")
+async def delete_outro(outro_id: str):
+    doc = await db.outros.find_one({"id": outro_id})
+    if not doc:
+        raise HTTPException(404, "Outro not found")
+    await db.outros.delete_one({"id": outro_id})
+    local = MEDIA_DIR / f"outro_{outro_id}.mp4"
+    if local.exists():
+        local.unlink(missing_ok=True)
+    return {"ok": True}
+
+
+@api_router.get("/outros/{outro_id}/video")
+async def get_outro_video(outro_id: str):
+    local = MEDIA_DIR / f"outro_{outro_id}.mp4"
+    if not local.exists():
+        doc = await db.outros.find_one({"id": outro_id})
+        if not doc or not doc.get("storage_path"):
+            raise HTTPException(404, "Outro not found")
+        content, _ = await run_in_threadpool(storage_client.get_object, doc["storage_path"])
+        local.write_bytes(content)
+    return FileResponse(str(local), media_type="video/mp4")
 
 
 app.include_router(api_router)

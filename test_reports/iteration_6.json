@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 6 (image_style picker + credit banner) validated end-to-end. Backend: added /app/backend/tests/test_reels_sixth_batch.py — 9/9 pytest cases pass in ~20s against the public EXPO_PUBLIC_BACKEND_URL. GET /api/config now returns image_styles containing all four expected ids [cinematic, photoreal, anime, painterly] with name+suffix payload. POST /api/reels {input_mode:'script', script:'A short test line.', visual_mode:'ai', image_style:'anime', voice_id:'onyx'} returns 200, echoes visual_mode='ai', image_style='anime', status='queued'. POST /api/reels with image_style omitted defaults to 'cinematic' as expected. Unknown image_style (e.g. 'totally-fake-style') is clamped server-side to 'cinematic' (server.py:152). No 500s on /api/config or /api/reels. ROOT-CAUSE reconfirmed: backend.err.log still shows `litellm.BadRequestError: OpenAIException - Budget has been exceeded! Current cost: 1.4571832500338555, Max budget: 1.4` — env/credits issue, not a code bug. Frontend (Expo web @ 390x844): Create screen renders the amber dismissible credit-banner at the top (copy: 'Your AI credits ran out — top up your Universal Key to generate. Tap to dismiss.') because a recent reel failed with a budget error. Tapping VISUAL STYLE → AI IMAGES (data-testid segment-ai — Segmented component scopes children as `segment-{id}` not `visual-mode-segment-ai`) reveals the new IMAGE STYLE chip row. All four chip testIDs render and are tappable: image-style-cinematic (default active), image-style-photoreal, image-style-anime, image-style-painterly. Toggling between chips updates the active outline. Switching back to GRADIENT hides the entire chip row. Tapping the credit-banner dismisses it (element removed from tree). No red screen errors; only pre-existing React 19 `props.pointerEvents is deprecated` warning from prior iterations.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "props.pointerEvents", "issue": "Pre-existing warning `props.pointerEvents is deprecated. Use style.pointerEvents` (not introduced this iteration). Reference: carried over from iterations 2-5."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_reels_sixth_batch.py",
+    "/app/test_reports/pytest/pytest_sixth_batch.xml"
+  ],
+  "action_items": [
+    "Env: raise/reset the Emergent universal LLM key budget cap (Current cost ~1.457 > Max 1.4). End-to-end AI-visual reel generation with image_style suffixes will succeed once credits are restored.",
+    "Optional polish: map reel.error strings containing 'Budget has been exceeded' to a friendlier UI copy on the reel detail screen (Create screen banner already handles the aggregate case).",
+    "Optional testID naming: consider aligning Segmented children testIDs to `${parentTestID}-${optionId}` (currently `segment-{id}`) for more predictable scoping across screens."
+  ],
+  "critical_code_review_comments": [
+    "server.py:34-42,86-92 & reels_config.py:86-92 — new IMAGE_STYLES with 4 entries and per-style prompt suffix; MAP fallback yields 'cinematic' default. Clean and consistent with existing catalog pattern.",
+    "server.py:152 clamps image_style to IMAGE_STYLE_MAP, so unknown/omitted values gracefully default to 'cinematic' without 400 — verified.",
+    "server.py:243-244 passes IMAGE_STYLE_MAP[...]['suffix'] into pipeline.generate_images(style_suffix=...) — style is actually appended to Gemini prompts.",
+    "app/(tabs)/index.tsx:30 imageStyle state + 262-267 credit banner + 288-298 IMAGE STYLE ChipSelector (testID root 'image-style' with child chips 'image-style-{id}') + 105-107 budget-fail detector — all wired correctly.",
+    "index.tsx:206 sends image_style in createReel payload, ensuring the picker is respected by the backend."
+  ],
+  "updated_files": ["/app/backend/tests/test_reels_sixth_batch.py (new)"],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% (banner render + dismiss, AI toggle, 4 chip render + toggle, hide on gradient)"},
+  "seed_data_creation": "8 short-lived reels created during pytest (all cleaned up via module-scoped teardown DELETE /api/reels/{id}).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: `cd /app/backend && python -m pytest tests/test_reels_sixth_batch.py -v --junitxml=/app/test_reports/pytest/pytest_sixth_batch.xml`. New testIDs added this iteration: credit-banner, image-style-cinematic|photoreal|anime|painterly. Note: Segmented option testIDs are `segment-{id}` (e.g. segment-ai, segment-gradient), NOT prefixed with the parent testID. Budget cap error string still present in backend.err.log — env fix needed to test real AI render output.",
+  "rca_of_issue": "Not applicable this iteration (no new bug). Prior-iteration RCA still stands: Emergent LLM universal-key budget cap (Max 1.4, current ~1.457) blocks any real generation call; reel creation still returns 200/queued and the failure surfaces via reel.error → Create screen's new credit-banner picks that up automatically."
+}

@@ -2,6 +2,7 @@ const BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api`;
 
 export type Voice = { id: string; name: string; tagline: string };
 export type VoiceSpeed = { id: string; name: string };
+export type ImageStyle = { id: string; name: string };
 export type CaptionStyle = { id: string; name: string; hint: string; hex: string };
 export type CaptionPosition = { id: string; name: string };
 export type CaptionSize = { id: string; name: string };
@@ -13,6 +14,7 @@ export type MusicTrack = { id: string; name: string };
 export type Config = {
   voices: Voice[];
   voice_speeds: VoiceSpeed[];
+  image_styles: ImageStyle[];
   caption_styles: CaptionStyle[];
   caption_positions: CaptionPosition[];
   caption_sizes: CaptionSize[];
@@ -33,8 +35,11 @@ export type Reel = {
   input_mode: "topic" | "script";
   topic: string | null;
   script: string | null;
+  series_id: string | null;
+  episode_number: number | null;
   seconds: number;
   visual_mode: string;
+  image_style: string;
   voice_id: string;
   voice_speed: string;
   caption_style: string;
@@ -51,6 +56,7 @@ export type Reel = {
   watermark: string | null;
   hook_enabled: boolean;
   endcard_text: string | null;
+  outro_id: string | null;
   views: number;
   downloads: number;
   scheduled_at: string | null;
@@ -58,9 +64,24 @@ export type Reel = {
   progress: number;
   stage_label: string;
   error: string | null;
+  error_code: string | null;
   duration: number | null;
   word_count: number | null;
   has_video: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Character = { name: string; description: string };
+export type Outro = { id: string; name: string; size: number; created_at: string };
+export type Series = {
+  id: string;
+  title: string;
+  premise: string;
+  tone: string;
+  characters: Character[];
+  settings: Record<string, any>;
+  episode_count: number;
   created_at: string;
   updated_at: string;
 };
@@ -100,6 +121,36 @@ export const api = {
   deleteReel: (id: string) => req<{ ok: boolean }>(`/reels/${id}`, { method: "DELETE" }),
   addView: (id: string) => req<{ views: number }>(`/reels/${id}/view`, { method: "POST" }),
   addDownload: (id: string) => req<{ downloads: number }>(`/reels/${id}/download`, { method: "POST" }),
+  listSeries: () => req<Series[]>("/series"),
+  getSeries: (id: string) => req<{ series: Series; episodes: Reel[] }>(`/series/${id}`),
+  createSeries: (payload: Record<string, any>) =>
+    req<Series>("/series", { method: "POST", body: JSON.stringify(payload) }),
+  suggestCharacters: (premise: string, tone: string) =>
+    req<{ characters: Character[] }>("/series/suggest", {
+      method: "POST",
+      body: JSON.stringify({ premise, tone }),
+    }),
+  createEpisode: (id: string, topic?: string) =>
+    req<Reel>(`/series/${id}/episode`, {
+      method: "POST",
+      body: JSON.stringify({ topic: topic || null }),
+    }),
+  deleteSeries: (id: string) => req<{ ok: boolean }>(`/series/${id}`, { method: "DELETE" }),
+  listOutros: () => req<Outro[]>("/outros"),
+  deleteOutro: (id: string) => req<{ ok: boolean }>(`/outros/${id}`, { method: "DELETE" }),
+  outroVideoUrl: (id: string) => `${BASE}/outros/${id}/video`,
+  uploadOutro: async (uri: string, name: string): Promise<Outro> => {
+    const form = new FormData();
+    form.append("file", { uri, name: name || "outro.mp4", type: "video/mp4" } as any);
+    form.append("name", name || "Outro clip");
+    const res = await fetch(`${BASE}/outros`, { method: "POST", body: form });
+    if (!res.ok) {
+      let msg = "Upload failed";
+      try { msg = (await res.json()).detail || msg; } catch {}
+      throw new Error(msg);
+    }
+    return res.json() as Promise<Outro>;
+  },
   videoUrl: (id: string) => `${BASE}/reels/${id}/video`,
   thumbUrl: (id: string) => `${BASE}/reels/${id}/thumb`,
   voicePreviewUrl: (voiceId: string) => `${BASE}/voices/${voiceId}/preview`,

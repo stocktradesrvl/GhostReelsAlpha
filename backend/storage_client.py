@@ -1,5 +1,7 @@
 """Emergent Managed Object Storage helpers (sync requests, call via threadpool)."""
 import os
+import time
+
 import requests
 
 STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
@@ -28,23 +30,24 @@ def _reset():
 
 def put_object(path: str, data: bytes, content_type: str) -> dict:
     key = init_storage()
-    resp = requests.put(
-        f"{STORAGE_URL}/objects/{path}",
-        headers={"X-Storage-Key": key, "Content-Type": content_type},
-        data=data,
-        timeout=180,
-    )
-    if resp.status_code == 503:
-        _reset()
-        key = init_storage()
+    last = None
+    for attempt in range(3):
         resp = requests.put(
             f"{STORAGE_URL}/objects/{path}",
             headers={"X-Storage-Key": key, "Content-Type": content_type},
             data=data,
             timeout=180,
         )
-    resp.raise_for_status()
-    return resp.json()
+        if resp.status_code < 500:
+            resp.raise_for_status()
+            return resp.json()
+        # Transient 5xx (incl. 503 stale key): reset key and back off, then retry.
+        last = resp
+        _reset()
+        key = init_storage()
+        time.sleep(0.8 * (attempt + 1))
+    last.raise_for_status()
+    return last.json()
 
 
 def get_object(path: str):

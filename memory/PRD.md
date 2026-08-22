@@ -82,6 +82,28 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
   dummy scenes (scenes advance correctly). NOTE: user's reported "error creating video" = Universal LLM key
   BUDGET CAP (Max budget 1.4 exceeded), confirmed by testing agent — a credits issue, not a code bug.
 
+- **Follow-up (2026-08 · batch 8 · forked): SERIES + Custom Outro + friendlier errors.**
+  - **Series** (`series` collection: `{id,title,premise,tone,characters:[{name,description}],settings(ReelSettings snapshot),episode_count}`).
+    Reels gained `series_id` + `episode_number`. Endpoints: `POST/GET /api/series`, `GET /api/series/{id}`
+    (returns `{series, episodes}`), `DELETE /api/series/{id}`, `POST /api/series/suggest` (AI character bible from
+    premise), `POST /api/series/{id}/episode` (optional `topic`; blank = AI continues). `pipeline.generate_series_script`
+    feeds premise+tone+character bible+prior episode scripts for continuity; AI-visual prompts get the character bible
+    appended so recurring characters stay visually consistent. Frontend: new **Series tab** + `series/new` (title,
+    premise, tone, AI-suggest characters, visual/voice/length, global outro) + `series/[id]` (bible, episode list,
+    "Generate episode N" with optional topic).
+  - **Custom Outro** (`outros` collection; `POST /api/outros` multipart → object storage, `GET/DELETE /api/outros`,
+    `GET /api/outros/{id}/video`). `outro_id` added to ReelSettings → reels/series. `pipeline.append_outro` normalises
+    the clip to 1080×1920/30fps and concats it after the render (adds silent audio if the clip has none). Frontend:
+    reusable `OutroSheet` (upload via expo-image-picker, select/delete) wired into Create (per-reel) and New Series (global default).
+  - **Share + Reminders**: reel detail "Post to YouTube / Instagram" opens the native share sheet; "Remind me to post"
+    schedules a local notification (expo-notifications) via preset chips (1h/3h/tonight/tomorrow). Full auto-upload
+    (YouTube OAuth / Meta API) intentionally deferred per user until the app has a build.
+  - **Friendlier errors**: reels now carry `error_code` (`budget`|`storage`|`generic`); `classify_error()` maps raw
+    litellm/objstore failures to friendly copy on Create banner + reel detail. `storage_client.put_object` retries 5xx.
+  - **DEV FLAG**: `REELS_MOCK` in backend/.env — when `1`, the pipeline synthesises script/audio/captions/images/outro
+    (no LLM/TTS/image credits) so the full render can be tested cheaply. **Must stay `0` in production.** Verified via
+    testing agent iteration 7: backend 10/10 + frontend flows green.
+
 ## Backlog
 - P1: multiple caption layout presets; background music track option; ElevenLabs voice option.
 - P2: multi-aspect export (Reels/Shorts variants); onboarding; brand kit (logo watermark).

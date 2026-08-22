@@ -82,6 +82,15 @@ CAPTION_ANIMS = [
 ]
 CAPTION_ANIM_MAP = {a["id"]: a for a in CAPTION_ANIMS}
 
+# AI image styles -> prompt suffix appended to each scene prompt.
+IMAGE_STYLES = [
+    {"id": "cinematic", "name": "Cinematic", "suffix": "cinematic film still, dramatic moody lighting, shallow depth of field, photographic"},
+    {"id": "photoreal", "name": "Photoreal", "suffix": "ultra photorealistic, 8k, natural realistic lighting, lifelike detail"},
+    {"id": "anime", "name": "Anime", "suffix": "anime illustration, vibrant colors, clean linework, studio quality"},
+    {"id": "painterly", "name": "Painterly", "suffix": "digital painting, concept art, artstation, dramatic brushwork"},
+]
+IMAGE_STYLE_MAP = {s["id"]: s for s in IMAGE_STYLES}
+
 # Background motion -> gradient animation speed (higher = colors shift faster).
 BG_MOTIONS = [
     {"id": "subtle", "name": "Subtle", "speed": 0.006},

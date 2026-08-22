@@ -37,9 +37,31 @@ FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 MUSIC_DIR = str(ROOT_DIR / "assets" / "music")
 WORDS_PER_SEC = 2.5
 
+# Dev-only: when REELS_MOCK=1, skip all paid LLM/TTS/Whisper/image calls and
+# synthesise placeholder script/audio/captions/images so the full render pipeline
+# can be exercised end-to-end without spending Universal Key credits.
+MOCK = os.environ.get("REELS_MOCK", "0") == "1"
+
+_MOCK_SCRIPT = (
+    "Deep beneath the waves lies a world we barely understand. "
+    "Creatures glow in the crushing dark where sunlight never reaches. "
+    "Some have survived unchanged for millions of years. "
+    "The ocean still hides its greatest secrets from us. "
+    "What else is down there, waiting to be found."
+)
+
 
 def _ffmpeg_exe() -> str:
     return FFMPEG if os.path.exists(FFMPEG) else (shutil.which("ffmpeg") or "ffmpeg")
+
+
+async def _run_ffmpeg(cmd: list, cwd: str | None = None) -> None:
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed: {stderr.decode()[-800:]}")
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +69,8 @@ def _ffmpeg_exe() -> str:
 # ---------------------------------------------------------------------------
 async def generate_script(topic: str, seconds: int = 30) -> str:
     target_words = int(seconds * WORDS_PER_SEC)
+    if MOCK:
+        return _clean_script(f"{topic}. {_MOCK_SCRIPT}")
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
         session_id=f"script-{abs(hash(topic)) % 100000}",
@@ -93,9 +117,115 @@ def hook_line(script: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 1b. Series continuity — consistent characters + storyline across episodes
+# ---------------------------------------------------------------------------
+def character_bible_text(series: dict) -> str:
+    """Flatten a series' character list into a compact, prompt-ready block."""
+    chars = (series or {}).get("characters") or []
+    lines = []
+    for c in chars:
+        name = (c.get("name") or "").strip()
+        desc = (c.get("description") or "").strip()
+        if name or desc:
+            lines.append(f"- {name}: {desc}".strip(" -:") if not name else f"- {name}: {desc}")
+    return "\n".join(lines)
+
+
+async def suggest_characters(premise: str, tone: str = "", count: int = 3) -> list:
+    """Propose a small character bible for a new series from its premise."""
+    n = max(1, min(6, int(count or 3)))
+    if MOCK:
+        return [
+            {"name": f"Character {i + 1}", "description": "A vivid recurring figure central to the story."}
+            for i in range(n)
+        ]
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"chars-{abs(hash(premise)) % 100000}",
+        system_message="You design memorable, visually distinct recurring characters for a video series.",
+    ).with_model("openai", "gpt-5.4")
+    ask = (
+        f"For a short-form video SERIES with this premise: \"{premise}\"\n"
+        f"Tone: {tone or 'engaging'}.\n\n"
+        f"Invent exactly {n} recurring characters. For each give a short name and a vivid, "
+        f"visually specific description (appearance, clothing, defining features) so an image "
+        f"generator can draw them identically every episode.\n\n"
+        f"Return ONLY a JSON array of objects with keys \"name\" and \"description\"."
+    )
+    raw = await chat.send_message(UserMessage(text=ask))
+    out = []
+    try:
+        m = re.search(r"\[.*\]", raw, re.DOTALL)
+        data = json.loads(m.group(0)) if m else []
+        for d in data:
+            name = str(d.get("name", "")).strip()[:48]
+            desc = str(d.get("description", "")).strip()[:240]
+            if name or desc:
+                out.append({"name": name, "description": desc})
+    except Exception:
+        out = []
+    return out[:n]
+
+
+async def generate_series_script(series: dict, prior_scripts: list, topic, seconds: int = 30) -> str:
+    """Write the next episode, keeping characters, tone and plot consistent."""
+    target_words = int(seconds * WORDS_PER_SEC)
+    episode_no = len(prior_scripts) + 1
+    if MOCK:
+        lead = (topic or "The story continues").strip()
+        return _clean_script(f"Episode {episode_no}. {lead}. {_MOCK_SCRIPT}")
+
+    bible = character_bible_text(series)
+    prior = "\n\n".join(
+        f"Episode {i + 1}: {s}" for i, s in enumerate(prior_scripts[-4:])
+    ) or "(This is the first episode — establish the world and characters.)"
+    if topic:
+        direction = f"The beat/topic for this episode: \"{topic}\". Weave it into the ongoing storyline."
+    else:
+        direction = "Continue the storyline naturally from where the previous episode ended, advancing the plot."
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"series-{series.get('id','x')}-{episode_no}",
+        system_message=(
+            "You are an elite serialized short-form video scriptwriter. You keep characters, "
+            "tone and story continuity perfectly consistent across episodes."
+        ),
+    ).with_model("openai", "gpt-5.4")
+    prompt = (
+        f"Write episode {episode_no} of a faceless narrated video series.\n\n"
+        f"SERIES PREMISE: {series.get('premise','')}\n"
+        f"TONE: {series.get('tone','')}\n"
+        f"RECURRING CHARACTERS:\n{bible or '(none defined)'}\n\n"
+        f"PREVIOUS EPISODES:\n{prior}\n\n"
+        f"{direction}\n\n"
+        f"Rules:\n"
+        f"- About {target_words} words (~{seconds} seconds when spoken).\n"
+        f"- Open with a scroll-stopping hook that nods to the continuing story.\n"
+        f"- Keep character names and traits perfectly consistent with above.\n"
+        f"- Short, punchy, conversational spoken sentences.\n"
+        f"- Plain narration ONLY. No headings, scene directions, speaker labels.\n"
+        f"- No emojis, hashtags, markdown, or quotation marks.\n"
+        f"- End on a cliffhanger or hook that sets up the next episode.\n\n"
+        f"Return only the narration text."
+    )
+    text = await chat.send_message(UserMessage(text=prompt))
+    return _clean_script(text)
+
+
+# ---------------------------------------------------------------------------
 # 2. Voiceover (TTS)
 # ---------------------------------------------------------------------------
 async def synth_voice(script: str, voice_id: str, out_path: str, speed: float = 1.0) -> None:
+    if MOCK:
+        words = [w for w in re.sub(r"\s+", " ", script).strip().split(" ") if w]
+        dur = max(3.0, len(words) / WORDS_PER_SEC)
+        await _run_ffmpeg([
+            _ffmpeg_exe(), "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
+            "-t", f"{dur:.2f}", "-q:a", "9", out_path,
+        ])
+        Path(out_path + ".txt").write_text(script, encoding="utf-8")
+        return
     voice = VOICE_MAP.get(voice_id, VOICE_MAP["onyx"])["openai"]
     tts = OpenAITextToSpeech(api_key=EMERGENT_LLM_KEY)
     text = re.sub(r"\s+", " ", script).strip()[:4000]
@@ -119,6 +249,18 @@ async def synth_voice_sample(voice_id: str, out_path: str) -> None:
 # 3. Caption alignment (Whisper word timestamps)
 # ---------------------------------------------------------------------------
 async def transcribe_words(audio_path: str):
+    if MOCK:
+        sidecar = audio_path + ".txt"
+        script = Path(sidecar).read_text(encoding="utf-8") if os.path.exists(sidecar) else _MOCK_SCRIPT
+        tokens = [w for w in re.sub(r"\s+", " ", script).strip().split(" ") if w]
+        duration = max(3.0, len(tokens) / WORDS_PER_SEC)
+        step = duration / max(1, len(tokens))
+        words = []
+        for i, tok in enumerate(tokens):
+            start = round(i * step, 2)
+            end = round((i + 1) * step - 0.02, 2)
+            words.append({"word": tok, "start": start, "end": max(start + 0.05, end)})
+        return words, duration
     stt = OpenAISpeechToText(api_key=EMERGENT_LLM_KEY)
     with open(audio_path, "rb") as fh:
         result = await stt.transcribe(
@@ -383,23 +525,82 @@ def new_workdir() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Custom outro — append a user-supplied clip (e.g. "stay tuned for more")
+# ---------------------------------------------------------------------------
+async def _probe_clip(path: str):
+    """Return (duration_seconds, has_audio) for a media file via ffmpeg -i."""
+    proc = await asyncio.create_subprocess_exec(
+        _ffmpeg_exe(), "-i", path,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    _, err = await proc.communicate()
+    s = err.decode(errors="ignore")
+    has_audio = " Audio:" in s
+    dur = 3.0
+    m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", s)
+    if m:
+        h, mn, sec = m.groups()
+        dur = int(h) * 3600 + int(mn) * 60 + float(sec)
+    return max(0.3, dur), has_audio
+
+
+async def append_outro(main_path: str, outro_path: str, out_path: str) -> None:
+    """Concatenate `outro_path` after `main_path`, normalising the outro to 1080x1920."""
+    outro_dur, has_audio = await _probe_clip(outro_path)
+    vnorm = (
+        "scale=1080:1920:force_original_aspect_ratio=decrease,"
+        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30,format=yuv420p"
+    )
+    if has_audio:
+        inputs = ["-i", main_path, "-i", outro_path]
+        outro_audio = "[1:a]"
+    else:
+        inputs = ["-i", main_path, "-i", outro_path,
+                  "-f", "lavfi", "-t", f"{outro_dur:.2f}", "-i", "anullsrc=r=44100:cl=stereo"]
+        outro_audio = "[2:a]"
+    filter_complex = (
+        f"[0:v]{vnorm}[v0];"
+        f"[1:v]{vnorm}[v1];"
+        f"[0:a]aformat=sample_rates=44100:channel_layouts=stereo[a0];"
+        f"{outro_audio}aformat=sample_rates=44100:channel_layouts=stereo[a1];"
+        f"[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]"
+    )
+    cmd = [
+        _ffmpeg_exe(), "-y", *inputs,
+        "-filter_complex", filter_complex, "-map", "[v]", "-map", "[a]",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out_path,
+    ]
+    await _run_ffmpeg(cmd)
+
+
+# ---------------------------------------------------------------------------
 # AI Visuals: scene image prompts -> Gemini images -> Ken Burns background
 # ---------------------------------------------------------------------------
 def scene_count(seconds: int) -> int:
     return max(2, min(4, round((seconds or 30) / 10)))
 
 
-async def generate_scene_prompts(script: str, n: int) -> list:
+async def generate_scene_prompts(script: str, n: int, character_bible: str = "") -> list:
+    if MOCK:
+        return [f"Mock cinematic vertical scene {i + 1} for the story" for i in range(n)]
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
         session_id=f"prompts-{abs(hash(script)) % 100000}",
         system_message="You turn video scripts into vivid cinematic image prompts.",
     ).with_model("openai", "gpt-5.4")
+    char_note = (
+        f"\n\nRecurring characters that MUST appear consistently (same face, hair, clothing "
+        f"and style) whenever they are relevant to a beat:\n{character_bible}\n"
+        f"When a character appears, describe them using these exact details so they look "
+        f"identical across every scene."
+        if character_bible else ""
+    )
     ask = (
         f"For this short video narration, write exactly {n} vivid image-generation prompts, "
         f"one per key beat, that visually support the story. Cinematic, photographic, dramatic "
         f"lighting, vertical 9:16 composition. Do NOT include any text/words/letters in the image. "
-        f"Keep a consistent visual style across all prompts.\n\n"
+        f"Keep a consistent visual style across all prompts.{char_note}\n\n"
         f"Narration:\n{script}\n\n"
         f"Return ONLY a JSON array of {n} strings."
     )
@@ -416,15 +617,31 @@ async def generate_scene_prompts(script: str, n: int) -> list:
     return prompts
 
 
-async def generate_images(prompts: list, workdir: str) -> list:
+async def generate_images(prompts: list, workdir: str, style_suffix: str = "",
+                          character_bible: str = "") -> list:
     paths = []
+    if MOCK:
+        _colors = ["0x1E3A8A", "0x7C2D12", "0x065F46", "0x4C1D95", "0x9A3412", "0x155E75"]
+        for i, _ in enumerate(prompts):
+            out = os.path.join(workdir, f"scene_{i}.png")
+            await _run_ffmpeg([
+                _ffmpeg_exe(), "-y", "-f", "lavfi",
+                "-i", f"color=c={_colors[i % len(_colors)]}:s=1080x1920:d=1",
+                "-frames:v", "1", out,
+            ])
+            paths.append(out)
+        return paths
     for i, prompt in enumerate(prompts):
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"img-{i}-{abs(hash(prompt)) % 100000}",
             system_message="You are an image generation assistant.",
         ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
-        style = " Vertical 9:16 aspect ratio, ultra-detailed, cinematic color grade, no text."
+        style = f" {style_suffix}." if style_suffix else ""
+        style += " Vertical 9:16 aspect ratio, ultra-detailed, no text."
+        if character_bible:
+            style += (f" Keep recurring characters visually identical across images "
+                      f"(same face, hair, outfit): {character_bible}.")
         _text, images = await chat.send_message_multimodal_response(UserMessage(text=prompt + style))
         if not images:
             raise RuntimeError("Image generation returned no image")

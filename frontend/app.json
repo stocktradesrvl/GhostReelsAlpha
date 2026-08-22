@@ -45,7 +45,20 @@
           "savePhotosPermission": "Save your finished reels to your gallery",
           "isAccessMediaLocationEnabled": false
         }
-      ]
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Pick a short video to use as your reel outro"
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#EF4444"
+        }
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true

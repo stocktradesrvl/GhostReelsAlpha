@@ -7,9 +7,10 @@ import { Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-nati
 import { KeyboardAwareScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { api, Config } from "@/src/api";
+import { api, Config, Outro } from "@/src/api";
 import { playPreview, stopPreview } from "@/src/audioPreview";
 import OptionSheet, { SheetOption } from "@/src/components/OptionSheet";
+import OutroSheet from "@/src/components/OutroSheet";
 import PresetSheet from "@/src/components/PresetSheet";
 import PrimaryButton from "@/src/components/PrimaryButton";
 import Segmented from "@/src/components/Segmented";
@@ -27,6 +28,8 @@ export default function CreateScreen() {
   const [config, setConfig] = useState<Config | null>(null);
   const [mode, setMode] = useState<"topic" | "script">("topic");
   const [visualMode, setVisualMode] = useState<"gradient" | "ai">("gradient");
+  const [imageStyle, setImageStyle] = useState("cinematic");
+  const [creditWarn, setCreditWarn] = useState(false);
   const [topic, setTopic] = useState("");
   const [script, setScript] = useState("");
   const [seconds, setSeconds] = useState(30);
@@ -46,6 +49,7 @@ export default function CreateScreen() {
   const [watermark, setWatermark] = useState("");
   const [hookEnabled, setHookEnabled] = useState(false);
   const [endcardText, setEndcardText] = useState("");
+  const [outro, setOutro] = useState<Outro | null>(null);
   const [previewingVoice, setPreviewingVoice] = useState<string | null>(null);
   const [writing, setWriting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -56,18 +60,20 @@ export default function CreateScreen() {
   const bgSheet = useRef<BottomSheetModal>(null);
   const musicSheet = useRef<BottomSheetModal>(null);
   const presetSheet = useRef<BottomSheetModal>(null);
+  const outroSheet = useRef<BottomSheetModal>(null);
 
   const currentSettings = {
-    seconds, visual_mode: visualMode, voice_id: voiceId, voice_speed: voiceSpeed, caption_style: captionStyle,
+    seconds, visual_mode: visualMode, image_style: imageStyle, voice_id: voiceId, voice_speed: voiceSpeed, caption_style: captionStyle,
     caption_position: captionPosition, caption_size: captionSize, caption_font: captionFont,
     caption_anim: captionAnim, bg_theme: bgTheme, bg_motion: bgMotion, music_id: musicId,
     music_volume: musicVolume, watermark, hook_enabled: hookEnabled, endcard_text: endcardText,
-    custom_c1: customC1, custom_c2: customC2,
+    custom_c1: customC1, custom_c2: customC2, outro_id: outro?.id,
   };
 
   const applySettings = useCallback((s: Record<string, any>) => {
     if (s.seconds != null) setSeconds(s.seconds);
     if (s.visual_mode) setVisualMode(s.visual_mode);
+    if (s.image_style) setImageStyle(s.image_style);
     if (s.voice_id) setVoiceId(s.voice_id);
     if (s.voice_speed) setVoiceSpeed(s.voice_speed);
     if (s.caption_style) setCaptionStyle(s.caption_style);
@@ -84,6 +90,7 @@ export default function CreateScreen() {
     setWatermark(s.watermark || "");
     setHookEnabled(!!s.hook_enabled);
     setEndcardText(s.endcard_text || "");
+    setOutro(s.outro_id ? { id: s.outro_id, name: "Selected outro", size: 0, created_at: "" } : null);
     haptic.success();
     presetSheet.current?.dismiss();
   }, []);
@@ -98,6 +105,13 @@ export default function CreateScreen() {
   }, []);
 
   useEffect(() => {
+    api.listReels().then((rs) => {
+      const budgetFail = rs.some((r) => r.status === "failed" && (r.error_code === "budget" || (r.error && /budget|credit/i.test(r.error))));
+      setCreditWarn(budgetFail);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
     const dup = params.dup;
     if (!dup || appliedDup.current === dup) return;
     appliedDup.current = dup;
@@ -107,6 +121,7 @@ export default function CreateScreen() {
       setScript(r.script || "");
       setSeconds(r.seconds);
       if (r.visual_mode) setVisualMode(r.visual_mode);
+      if (r.image_style) setImageStyle(r.image_style);
       setVoiceId(r.voice_id);
       setVoiceSpeed(r.voice_speed);
       setCaptionStyle(r.caption_style);
@@ -123,6 +138,7 @@ export default function CreateScreen() {
       setWatermark(r.watermark || "");
       setHookEnabled(r.hook_enabled);
       setEndcardText(r.endcard_text || "");
+      setOutro(r.outro_id ? { id: r.outro_id, name: "Selected outro", size: 0, created_at: "" } : null);
       haptic.light();
       router.setParams({ dup: "" });
     }).catch(() => {});
@@ -192,6 +208,7 @@ export default function CreateScreen() {
         script: script.trim() || undefined,
         seconds,
         visual_mode: visualMode,
+        image_style: imageStyle,
         voice_id: voiceId,
         voice_speed: voiceSpeed,
         caption_style: captionStyle,
@@ -208,6 +225,7 @@ export default function CreateScreen() {
         watermark: watermark.trim() || undefined,
         hook_enabled: hookEnabled,
         endcard_text: endcardText.trim() || undefined,
+        outro_id: outro?.id || undefined,
       } as any);
       haptic.heavy();
       router.push(`/reel/${reel.id}`);
@@ -217,7 +235,7 @@ export default function CreateScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [canGenerate, mode, topic, script, seconds, visualMode, voiceId, voiceSpeed, captionStyle, captionPosition, captionSize, captionFont, captionAnim, bgTheme, bgMotion, customC1, customC2, musicId, musicVolume, watermark, hookEnabled, endcardText, router]);
+  }, [canGenerate, mode, topic, script, seconds, visualMode, imageStyle, voiceId, voiceSpeed, captionStyle, captionPosition, captionSize, captionFont, captionAnim, bgTheme, bgMotion, customC1, customC2, musicId, musicVolume, watermark, hookEnabled, endcardText, outro, router]);
 
   return (
     <View style={styles.root}>
@@ -247,6 +265,13 @@ export default function CreateScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
+        {creditWarn && (
+          <Pressable testID="credit-banner" onPress={() => setCreditWarn(false)} style={styles.creditBanner}>
+            <Ionicons name="warning" size={16} color={colors.warning} />
+            <Text style={styles.creditText}>Your AI credits ran out — top up your Universal Key to generate. Tap to dismiss.</Text>
+          </Pressable>
+        )}
+
         <Segmented
           testID="mode-segment"
           options={[{ id: "topic", label: "GENERATE FROM TOPIC" }, { id: "script", label: "PASTE SCRIPT" }]}
@@ -265,6 +290,17 @@ export default function CreateScreen() {
           <Text style={styles.aiNote}>
             AI paints story-matching images for your reel (uses a few extra credits per video).
           </Text>
+        )}
+        {visualMode === "ai" && (
+          <>
+            <Text style={styles.section}>IMAGE STYLE</Text>
+            <ChipSelector
+              testID="image-style"
+              options={config?.image_styles || []}
+              value={imageStyle}
+              onChange={setImageStyle}
+            />
+          </>
         )}
 
         {mode === "topic" ? (
@@ -385,6 +421,13 @@ export default function CreateScreen() {
             label="Music"
             value={music?.name || "—"}
             onPress={() => musicSheet.current?.present()}
+          />
+          <SettingRow
+            testID="setting-outro"
+            icon="play-forward"
+            label="Outro clip"
+            value={outro ? outro.name : "None"}
+            onPress={() => outroSheet.current?.present()}
           />
         </View>
 
@@ -541,6 +584,11 @@ export default function CreateScreen() {
       <OptionSheet ref={bgSheet} title="Background theme" options={bgOptions} selectedId={bgTheme} onSelect={(id) => { setBgTheme(id); bgSheet.current?.dismiss(); }} />
       <OptionSheet ref={musicSheet} title="Background music" options={musicOptions} selectedId={musicId} onSelect={(id) => { setMusicId(id); musicSheet.current?.dismiss(); }} />
       <PresetSheet ref={presetSheet} currentSettings={currentSettings} onApply={applySettings} />
+      <OutroSheet
+        ref={outroSheet}
+        selectedId={outro?.id || null}
+        onSelect={(o) => { setOutro(o); outroSheet.current?.dismiss(); }}
+      />
     </View>
   );
 }
@@ -668,6 +716,18 @@ const styles = StyleSheet.create({
   brand: { fontFamily: font.display, fontSize: 26, color: colors.onSurface, letterSpacing: 1 },
   sub: { fontFamily: font.body, fontSize: 12, color: colors.onSurfaceSecondary, marginTop: 2 },
   aiNote: { fontFamily: font.body, fontSize: 12, color: colors.brandSecondary, marginTop: spacing.sm, lineHeight: 17 },
+  creditBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: "rgba(234,179,8,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(234,179,8,0.35)",
+  },
+  creditText: { flex: 1, fontFamily: font.bodyMed, fontSize: 12, color: colors.warning, lineHeight: 16 },
   headerRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   batchBtn: {
     flexDirection: "row",

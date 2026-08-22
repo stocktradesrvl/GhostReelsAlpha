@@ -5,7 +5,7 @@ import * as MediaLibrary from "expo-media-library";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api, Reel } from "@/src/api";
@@ -13,6 +13,7 @@ import PreviewPlayer from "@/src/components/PreviewPlayer";
 import PrimaryButton from "@/src/components/PrimaryButton";
 import StageProgress from "@/src/components/StageProgress";
 import { haptic } from "@/src/haptics";
+import { ensureNotificationPermission, schedulePostReminder } from "@/src/reminders";
 import { colors, font, radius, spacing } from "@/src/theme";
 
 const BG_PREVIEW: Record<string, string[]> = {
@@ -33,6 +34,7 @@ export default function ReelDetail() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [permBlocked, setPermBlocked] = useState(false);
+  const [showReminders, setShowReminders] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const celebrated = useRef(false);
@@ -139,6 +141,7 @@ export default function ReelDetail() {
         script: reel.script || undefined,
         seconds: reel.seconds,
         visual_mode: reel.visual_mode,
+        image_style: reel.image_style,
         voice_id: reel.voice_id,
         voice_speed: reel.voice_speed,
         caption_style: reel.caption_style,
@@ -175,6 +178,38 @@ export default function ReelDetail() {
     haptic.light();
     router.push({ pathname: "/(tabs)", params: { dup: id } });
   }, [id, router]);
+
+  const scheduleReminder = useCallback(async (preset: "1h" | "3h" | "tonight" | "tomorrow") => {
+    if (!reel) return;
+    const perm = await ensureNotificationPermission();
+    if (!perm.granted) {
+      haptic.error();
+      if (!perm.canAskAgain) {
+        Alert.alert("Notifications are off", "Enable notifications in Settings to get post reminders.", [
+          { text: "Cancel", style: "cancel" },
+          { text: "Open Settings", onPress: () => Linking.openSettings() },
+        ]);
+      } else {
+        showToast("Notifications permission was denied.");
+      }
+      return;
+    }
+    const when = new Date();
+    if (preset === "1h") when.setHours(when.getHours() + 1);
+    else if (preset === "3h") when.setHours(when.getHours() + 3);
+    else if (preset === "tonight") { when.setHours(19, 0, 0, 0); if (when.getTime() <= Date.now()) when.setDate(when.getDate() + 1); }
+    else { when.setDate(when.getDate() + 1); when.setHours(9, 0, 0, 0); }
+    try {
+      await schedulePostReminder(when, reel.title || "your reel", reel.id);
+      haptic.success();
+      setShowReminders(false);
+      const label = when.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+      showToast(`Reminder set for ${label} ✓`);
+    } catch {
+      haptic.error();
+      showToast("Couldn't set the reminder.");
+    }
+  }, [reel, showToast]);
 
   const grad = BG_PREVIEW[reel?.bg_theme || "ember"] || BG_PREVIEW.ember;
   const isReady = reel?.status === "ready";
@@ -264,8 +299,8 @@ export default function ReelDetail() {
                 <PrimaryButton
                   testID="export-button"
                   variant="ghost"
-                  label="Share MP4"
-                  icon="share-outline"
+                  label="Post to YouTube / Instagram"
+                  icon="share-social-outline"
                   loading={exporting}
                   onPress={exportReel}
                   style={{ marginTop: spacing.sm }}
@@ -281,6 +316,33 @@ export default function ReelDetail() {
                   />
                 )}
               </>
+            )}
+            <PrimaryButton
+              testID="remind-button"
+              variant="ghost"
+              label="Remind me to post"
+              icon="alarm-outline"
+              onPress={() => { haptic.select(); setShowReminders((v) => !v); }}
+              style={{ marginTop: spacing.sm }}
+            />
+            {showReminders && (
+              <View style={styles.reminderRow} testID="reminder-presets">
+                {[
+                  { id: "1h", label: "In 1 hour" },
+                  { id: "3h", label: "In 3 hours" },
+                  { id: "tonight", label: "Tonight 7pm" },
+                  { id: "tomorrow", label: "Tmrw 9am" },
+                ].map((p) => (
+                  <Pressable
+                    key={p.id}
+                    testID={`reminder-${p.id}`}
+                    onPress={() => scheduleReminder(p.id as any)}
+                    style={styles.reminderChip}
+                  >
+                    <Text style={styles.reminderChipTxt}>{p.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
             )}
             <PrimaryButton
               testID="duplicate-button"
@@ -309,8 +371,10 @@ export default function ReelDetail() {
           </View>
           <Text style={styles.stateTitle}>Generation failed</Text>
           <Text style={styles.stateSub}>
-            {reel?.error && /budget/i.test(reel.error)
-              ? "Your AI credits ran out. Top up your Universal Key (Profile → Manage plan → Universal Key → Add Balance), then tap Try again."
+            {reel?.error_code === "budget" || (reel?.error && /budget|credit/i.test(reel.error))
+              ? "You're out of AI credits. Top up your Universal Key (Profile → Manage plan → Universal Key → Add Balance), then tap Try again."
+              : reel?.error_code === "storage"
+              ? "Couldn't save your video to cloud storage just now. Please tap Try again in a moment."
               : (reel?.error || "Something went wrong while rendering.")}
           </Text>
           <PrimaryButton testID="retry-button" label="Try again" icon="refresh" onPress={retry} style={{ marginTop: spacing.lg, alignSelf: "stretch" }} />
@@ -372,6 +436,13 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.md, marginBottom: spacing.md },
   statChip: { flexDirection: "row", alignItems: "center", gap: 4 },
   statTxt: { fontFamily: font.bodySemi, fontSize: 12, color: colors.onSurfaceSecondary },
+  reminderRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.sm },
+  reminderChip: {
+    flexGrow: 1, minWidth: "22%", height: 40, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary,
+    alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.sm,
+  },
+  reminderChipTxt: { fontFamily: font.bodySemi, fontSize: 12, color: colors.onBrandTertiary },
   failIcon: {
     width: 64,
     height: 64,
