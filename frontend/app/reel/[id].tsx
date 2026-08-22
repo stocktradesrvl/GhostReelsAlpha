@@ -1,10 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as FileSystem from "expo-file-system/legacy";
+import * as MediaLibrary from "expo-media-library";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api, Reel } from "@/src/api";
@@ -29,8 +30,18 @@ export default function ReelDetail() {
   const [reel, setReel] = useState<Reel | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [permBlocked, setPermBlocked] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const celebrated = useRef(false);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2800);
+  }, []);
 
   const poll = useCallback(async () => {
     if (!id) return;
@@ -56,23 +67,61 @@ export default function ReelDetail() {
     };
   }, [poll]);
 
+  const downloadToCache = useCallback(async () => {
+    const url = api.videoUrl(id!);
+    const dest = `${FileSystem.cacheDirectory}reel-${id}.mp4`;
+    const { uri } = await FileSystem.downloadAsync(url, dest);
+    return uri;
+  }, [id]);
+
   const exportReel = useCallback(async () => {
     if (!id) return;
     setExporting(true);
     try {
-      const url = api.videoUrl(id);
-      const dest = `${FileSystem.cacheDirectory}reel-${id}.mp4`;
-      const { uri } = await FileSystem.downloadAsync(url, dest);
+      const uri = await downloadToCache();
       haptic.medium();
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, { mimeType: "video/mp4", dialogTitle: "Share your reel" });
+      } else {
+        showToast("Sharing isn't available here.");
       }
     } catch {
       haptic.error();
+      showToast("Couldn't export. Try again.");
     } finally {
       setExporting(false);
     }
-  }, [id]);
+  }, [id, downloadToCache, showToast]);
+
+  const saveToGallery = useCallback(async () => {
+    if (!id) return;
+    setSaving(true);
+    try {
+      let perm = await MediaLibrary.getPermissionsAsync(true);
+      if (perm.status !== "granted" && perm.canAskAgain) {
+        perm = await MediaLibrary.requestPermissionsAsync(true);
+      }
+      if (perm.status !== "granted") {
+        haptic.error();
+        if (!perm.canAskAgain) {
+          setPermBlocked(true);
+          showToast("Photos access is off — enable it in Settings.");
+        } else {
+          showToast("Photos permission was denied.");
+        }
+        return;
+      }
+      const uri = await downloadToCache();
+      await MediaLibrary.saveToLibraryAsync(uri);
+      haptic.success();
+      showToast("Saved to your gallery ✓");
+    } catch {
+      haptic.error();
+      showToast("Couldn't save. Try Share instead.");
+    } finally {
+      setSaving(false);
+    }
+  }, [id, downloadToCache, showToast]);
 
   const retry = useCallback(async () => {
     if (!reel) return;
@@ -83,12 +132,15 @@ export default function ReelDetail() {
         script: reel.script || undefined,
         seconds: reel.seconds,
         voice_id: reel.voice_id,
+        voice_speed: reel.voice_speed,
         caption_style: reel.caption_style,
         caption_position: reel.caption_position,
         caption_size: reel.caption_size,
         bg_theme: reel.bg_theme,
         music_id: reel.music_id,
+        music_volume: reel.music_volume,
         watermark: reel.watermark || undefined,
+        hook_enabled: reel.hook_enabled,
       } as any);
       celebrated.current = false;
       router.replace(`/reel/${fresh.id}`);
@@ -153,17 +205,53 @@ export default function ReelDetail() {
           <View style={styles.playerFrame} testID="reel-player">
             <PreviewPlayer uri={api.videoUrl(id!)} testID="video-view" />
           </View>
+          {toast && (
+            <View style={styles.toast} testID="save-toast">
+              <Text style={styles.toastText}>{toast}</Text>
+            </View>
+          )}
           <View style={[styles.actions, { paddingBottom: insets.bottom + spacing.md }]}>
             <Text style={styles.meta}>
               {reel?.duration ? `${reel.duration.toFixed(0)}s` : ""} · 1080×1920 · {reel?.word_count || 0} words
             </Text>
-            <PrimaryButton
-              testID="export-button"
-              label={Platform.OS === "web" ? "Download MP4" : "Save / Share MP4"}
-              icon="share-outline"
-              loading={exporting}
-              onPress={exportReel}
-            />
+            {Platform.OS === "web" ? (
+              <PrimaryButton
+                testID="export-button"
+                label="Download MP4"
+                icon="download-outline"
+                loading={exporting}
+                onPress={exportReel}
+              />
+            ) : (
+              <>
+                <PrimaryButton
+                  testID="save-gallery-button"
+                  label="Save to gallery"
+                  icon="download-outline"
+                  loading={saving}
+                  onPress={saveToGallery}
+                />
+                <PrimaryButton
+                  testID="export-button"
+                  variant="ghost"
+                  label="Share MP4"
+                  icon="share-outline"
+                  loading={exporting}
+                  onPress={exportReel}
+                  style={{ marginTop: spacing.sm }}
+                />
+                {permBlocked && (
+                  <PrimaryButton
+                    testID="open-settings-button"
+                    variant="ghost"
+                    label="Open Settings"
+                    icon="settings-outline"
+                    onPress={() => Linking.openSettings()}
+                    style={{ marginTop: spacing.sm }}
+                  />
+                )}
+              </>
+            )}
             <PrimaryButton
               testID="new-reel-button"
               variant="ghost"
@@ -224,6 +312,20 @@ const styles = StyleSheet.create({
   readyWrap: { flex: 1 },
   playerFrame: { flex: 1, marginHorizontal: spacing.lg, borderRadius: radius.lg, overflow: "hidden", borderWidth: 1, borderColor: colors.border },
   actions: { padding: spacing.lg, paddingTop: spacing.md },
+  toast: {
+    position: "absolute",
+    left: spacing.lg,
+    right: spacing.lg,
+    bottom: 210,
+    backgroundColor: colors.surfaceTertiary,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    alignItems: "center",
+  },
+  toastText: { fontFamily: font.bodySemi, fontSize: 13, color: colors.onSurface },
   meta: { fontFamily: font.bodyMed, fontSize: 12, color: colors.onSurfaceSecondary, textAlign: "center", marginBottom: spacing.md },
   failIcon: {
     width: 64,

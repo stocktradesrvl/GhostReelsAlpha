@@ -28,6 +28,8 @@ from reels_config import (
     MUSIC_MAP,
     MUSIC_TRACKS,
     VOICE_MAP,
+    VOICE_SPEED_MAP,
+    VOICE_SPEEDS,
     VOICES,
 )
 
@@ -67,18 +69,21 @@ class CreateReelRequest(BaseModel):
     script: Optional[str] = None
     seconds: int = 30
     voice_id: str = "onyx"
+    voice_speed: str = "normal"
     caption_style: str = "signal"
     caption_position: str = "center"
     caption_size: str = "m"
     bg_theme: str = "ember"
     music_id: str = "none"
+    music_volume: float = 0.13
     watermark: Optional[str] = None
+    hook_enabled: bool = False
 
 
 PUBLIC_FIELDS = {
-    "id", "title", "input_mode", "topic", "script", "seconds", "voice_id",
+    "id", "title", "input_mode", "topic", "script", "seconds", "voice_id", "voice_speed",
     "caption_style", "caption_position", "caption_size", "bg_theme", "music_id",
-    "watermark", "status", "progress", "stage_label", "error",
+    "music_volume", "watermark", "hook_enabled", "status", "progress", "stage_label", "error",
     "duration", "word_count", "has_video", "created_at", "updated_at",
 }
 
@@ -112,7 +117,8 @@ async def run_pipeline(reel_id: str):
         # Stage 2: voiceover
         await update_reel(reel_id, status="voicing", progress=30, stage_label="Recording voiceover")
         audio_path = os.path.join(workdir, "voice.mp3")
-        await pipeline.synth_voice(script, reel["voice_id"], audio_path)
+        speed = VOICE_SPEED_MAP.get(reel.get("voice_speed", "normal"), VOICE_SPEED_MAP["normal"])["speed"]
+        await pipeline.synth_voice(script, reel["voice_id"], audio_path, speed=speed)
 
         # Stage 3: captions
         await update_reel(reel_id, status="captioning", progress=55, stage_label="Aligning captions")
@@ -125,6 +131,7 @@ async def run_pipeline(reel_id: str):
             position=reel.get("caption_position", "center"),
             size=reel.get("caption_size", "m"),
             watermark=reel.get("watermark") or "",
+            hook_text=pipeline.hook_line(script) if reel.get("hook_enabled") else "",
         )
 
         # Stage 4: render
@@ -135,6 +142,7 @@ async def run_pipeline(reel_id: str):
         await pipeline.render_video(
             audio_path, "subs.ass", reel["bg_theme"], duration, workdir, out_path,
             music_id=reel.get("music_id", "none"),
+            music_volume=reel.get("music_volume", 0.13),
         )
         await pipeline.extract_thumbnail(out_path, thumb_path)
 
@@ -174,6 +182,7 @@ async def root():
 async def get_config():
     return {
         "voices": VOICES,
+        "voice_speeds": VOICE_SPEEDS,
         "caption_styles": CAPTION_STYLES,
         "caption_positions": CAPTION_POSITIONS,
         "caption_sizes": CAPTION_SIZES,
@@ -205,6 +214,8 @@ async def voice_preview(voice_id: str):
 async def create_reel(req: CreateReelRequest):
     if req.voice_id not in VOICE_MAP:
         raise HTTPException(400, "Unknown voice")
+    if req.voice_speed not in VOICE_SPEED_MAP:
+        raise HTTPException(400, "Unknown voice speed")
     if req.caption_style not in CAPTION_MAP:
         raise HTTPException(400, "Unknown caption style")
     if req.caption_position not in CAPTION_POSITION_MAP:
@@ -235,12 +246,15 @@ async def create_reel(req: CreateReelRequest):
         "script": script,
         "seconds": req.seconds,
         "voice_id": req.voice_id,
+        "voice_speed": req.voice_speed,
         "caption_style": req.caption_style,
         "caption_position": req.caption_position,
         "caption_size": req.caption_size,
         "bg_theme": req.bg_theme,
         "music_id": req.music_id,
+        "music_volume": max(0.0, min(1.0, float(req.music_volume))),
         "watermark": (req.watermark or "").strip()[:32] or None,
+        "hook_enabled": bool(req.hook_enabled),
         "status": "queued",
         "progress": 0,
         "stage_label": "Queued",

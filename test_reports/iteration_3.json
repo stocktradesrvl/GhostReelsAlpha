@@ -1,0 +1,38 @@
+{
+  "summary": "Validated the third batch of follow-up features on Faceless AI Reels: (1) Voice Speed, (2) Music Volume slider, (3) Auto Hook Line toggle, (4) Save-to-gallery is native-only (not testable on web). Backend: added /app/backend/tests/test_reels_third_batch.py — 4/4 pytest cases passed in ~12s. GET /api/config now exposes voice_speeds [{slow,normal,fast}] alongside prior catalogs (voices, caption_styles, caption_positions, caption_sizes, bg_themes, music_tracks). POST /api/reels with invalid voice_speed='warp-speed' correctly returns 400. music_volume clamping verified: POST with music_volume=5 stored as 1.0 on the reel doc. End-to-end reel {script, voice_id=onyx, voice_speed=fast, caption_style=signal, caption_position=bottom, caption_size=m, bg=ember, music=cinematic, music_volume=0.3, watermark=@focus, hook_enabled=true} reached status=ready in <30s, GET /api/reels/{id} echoed voice_speed='fast', music_volume=0.3, hook_enabled=true, has_video=true; GET /api/reels/{id}/video returned 200 video/mp4 (>10KB). Frontend (Expo web preview @ 390x844): Create screen 'NARRATION SPEED' shows Slow/Normal/Fast chips (testIDs voice-speed-{slow|normal|fast}) — tapping Fast toggles selection; 'Auto hook title' switch (testID hook-toggle) flips on/off; WATERMARK input (testID watermark-input) accepts '@focus'; Music sheet lists No music / Lo-Fi Chill / Upbeat / Cinematic and picking Upbeat reveals the 'MUSIC LEVEL' slider (testID music-volume-slider) with a % label (13% default shown from 0.13 default). Native 'Save to gallery' (testID save-gallery-button) is intentionally web-hidden per problem statement and not tested. Only ONE new reel created (and auto-deleted), plus one create-only clamping doc (also auto-deleted); LLM budget preserved. Pre-existing React 19 element.ref warning still present in console (non-blocking, tracked in iteration_2). No new red-screen or component errors observed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "React 19 element.ref", "issue": "Console error `Accessing element.ref was removed in React 19. ref is now a regular prop.` fires when rendering Create screen (likely @gorhom/bottom-sheet or a forwardRef consumer). Non-blocking on web. Reference: pre-existing from iteration_2, not caused by this batch."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_reels_third_batch.py",
+    "/app/test_reports/pytest/pytest_third_batch.xml"
+  ],
+  "action_items": [
+    "Optional (carried over from iteration_2): silence the React 19 `element.ref` warning by upgrading/patching @gorhom/bottom-sheet or its forwardRef consumers."
+  ],
+  "critical_code_review_comments": [
+    "server.py:255 correctly clamps music_volume with max(0.0, min(1.0, float(req.music_volume))) — verified via test_music_volume_clamped_on_create.",
+    "server.py:217 validates voice_speed against VOICE_SPEED_MAP with a 400 error — verified.",
+    "server.py:120 & 145 correctly pass voice_speed multiplier to TTS and music_volume to the ffmpeg amix stage.",
+    "frontend index.tsx:284 conditionally renders MUSIC LEVEL slider only when musicId !== 'none' — matches product spec.",
+    "index.tsx:288 label shows Math.round(musicVolume * 100)% — clean UX; matches expectations."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_reels_third_batch.py (new)"
+  ],
+  "success_rate": {"backend": "100% (4/4 new)", "frontend": "100% (5/5 UI assertions passed)"},
+  "seed_data_creation": "One end-to-end reel + one create-only clamping doc, both deleted by their respective tests. Existing demo reels untouched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run new tests with `cd /app/backend && pytest tests/test_reels_third_batch.py -v --junitxml=/app/test_reports/pytest/pytest_third_batch.xml`. Frontend testIDs of interest for this batch: voice-speed-{slow|normal|fast}, music-volume-slider, hook-toggle, watermark-input, setting-music. Native-only save-gallery-button is not testable on Expo web preview (per problem statement). The end-to-end test auto-skips on LLM 'Max budget exceeded' errors.",
+  "rca_of_issue": "No bugs found. All four third-batch features are correctly implemented, validated end-to-end on backend, and functionally exercised on the Expo web preview UI."
+}

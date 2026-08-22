@@ -1,8 +1,9 @@
 import { BottomSheetModal } from "@gorhom/bottom-sheet";
 import { Ionicons } from "@expo/vector-icons";
+import Slider from "@react-native-community/slider";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -26,12 +27,15 @@ export default function CreateScreen() {
   const [script, setScript] = useState("");
   const [seconds, setSeconds] = useState(30);
   const [voiceId, setVoiceId] = useState("onyx");
+  const [voiceSpeed, setVoiceSpeed] = useState("normal");
   const [captionStyle, setCaptionStyle] = useState("signal");
   const [captionPosition, setCaptionPosition] = useState("center");
   const [captionSize, setCaptionSize] = useState("m");
   const [bgTheme, setBgTheme] = useState("ember");
   const [musicId, setMusicId] = useState("none");
+  const [musicVolume, setMusicVolume] = useState(0.13);
   const [watermark, setWatermark] = useState("");
+  const [hookEnabled, setHookEnabled] = useState(false);
   const [previewingVoice, setPreviewingVoice] = useState<string | null>(null);
   const [writing, setWriting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -113,12 +117,15 @@ export default function CreateScreen() {
         script: script.trim() || undefined,
         seconds,
         voice_id: voiceId,
+        voice_speed: voiceSpeed,
         caption_style: captionStyle,
         caption_position: captionPosition,
         caption_size: captionSize,
         bg_theme: bgTheme,
         music_id: musicId,
+        music_volume: musicVolume,
         watermark: watermark.trim() || undefined,
+        hook_enabled: hookEnabled,
       } as any);
       haptic.heavy();
       router.push(`/reel/${reel.id}`);
@@ -128,7 +135,7 @@ export default function CreateScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [canGenerate, mode, topic, script, seconds, voiceId, captionStyle, captionPosition, captionSize, bgTheme, musicId, watermark, router]);
+  }, [canGenerate, mode, topic, script, seconds, voiceId, voiceSpeed, captionStyle, captionPosition, captionSize, bgTheme, musicId, musicVolume, watermark, hookEnabled, router]);
 
   return (
     <View style={styles.root}>
@@ -266,6 +273,35 @@ export default function CreateScreen() {
           />
         </View>
 
+        <Text style={styles.section}>NARRATION SPEED</Text>
+        <ChipSelector
+          testID="voice-speed"
+          options={config?.voice_speeds || []}
+          value={voiceSpeed}
+          onChange={setVoiceSpeed}
+        />
+
+        {musicId !== "none" && (
+          <>
+            <View style={styles.scriptHead}>
+              <Text style={styles.section}>MUSIC LEVEL</Text>
+              <Text style={styles.wordCount}>{Math.round(musicVolume * 100)}%</Text>
+            </View>
+            <Slider
+              testID="music-volume-slider"
+              style={{ width: "100%", height: 40 }}
+              minimumValue={0}
+              maximumValue={1}
+              step={0.01}
+              value={musicVolume}
+              onValueChange={setMusicVolume}
+              minimumTrackTintColor={colors.brand}
+              maximumTrackTintColor={colors.surfaceTertiary}
+              thumbTintColor={colors.brandSecondary}
+            />
+          </>
+        )}
+
         <Text style={styles.section}>CAPTION POSITION</Text>
         <ChipSelector
           testID="caption-position"
@@ -281,6 +317,23 @@ export default function CreateScreen() {
           value={captionSize}
           onChange={setCaptionSize}
         />
+
+        <View style={styles.toggleRow}>
+          <View style={styles.settingLeft}>
+            <Ionicons name="flash-outline" size={18} color={colors.onSurfaceSecondary} />
+            <View>
+              <Text style={styles.settingLabel}>Auto hook title</Text>
+              <Text style={styles.toggleSub}>Flash the opening line for the first 2s</Text>
+            </View>
+          </View>
+          <Switch
+            testID="hook-toggle"
+            value={hookEnabled}
+            onValueChange={(v) => { haptic.light(); setHookEnabled(v); }}
+            trackColor={{ false: colors.surfaceTertiary, true: colors.brandPrimary }}
+            thumbColor="#fff"
+          />
+        </View>
 
         <Text style={styles.section}>WATERMARK · OPTIONAL</Text>
         <TextInput
@@ -488,6 +541,18 @@ const styles = StyleSheet.create({
   settingLabel: { fontFamily: font.bodySemi, fontSize: 15, color: colors.onSurface },
   settingRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   settingValue: { fontFamily: font.bodyMed, fontSize: 14, color: colors.onSurfaceSecondary },
+  toggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: spacing.lg,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  toggleSub: { fontFamily: font.body, fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 2 },
   miniDot: { width: 12, height: 12, borderRadius: 6 },
   miniSwatchWrap: { flexDirection: "row", borderRadius: radius.sm, overflow: "hidden" },
   miniSwatch: { width: 8, height: 16 },

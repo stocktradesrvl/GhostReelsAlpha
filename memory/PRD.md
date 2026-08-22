@@ -52,6 +52,11 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
   **Brand Watermark** (top-center, rendered via libass overlay — static ffmpeg has no drawtext);
   **Voice Preview** (`GET /api/voices/{id}/preview` cached TTS sample, played via expo-audio in
   the voice picker). Tested: backend 8/8 + frontend 5/5 pass.
+- **Follow-up (2026-08 · batch 3): Music Volume** per-reel slider (`music_volume` 0..1 → ffmpeg
+  amix); **Voice Speed** slow/normal/fast (`voice_speed` → TTS speed); **Auto Hook Line**
+  (`hook_enabled` burns the opening line as an amber title card in first ~2s via libass);
+  **Save to Gallery** (native, expo-media-library with full permission handling + Open Settings
+  fallback; web falls back to Download). Tested: backend 4/4 + frontend 5/5 pass.
 
 ## Backlog
 - P1: multiple caption layout presets; background music track option; ElevenLabs voice option.

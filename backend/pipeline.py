@@ -74,14 +74,29 @@ def _clean_script(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
+def hook_line(script: str) -> str:
+    """First sentence of the script, trimmed to a punchy title-card length."""
+    flat = re.sub(r"\s+", " ", script or "").strip()
+    if not flat:
+        return ""
+    m = re.split(r"(?<=[.!?])\s", flat, maxsplit=1)
+    first = m[0].strip().rstrip(".!?").strip()
+    words = first.split()
+    if len(words) > 7:
+        first = " ".join(words[:7])
+    return first[:48].strip()
+
+
 # ---------------------------------------------------------------------------
 # 2. Voiceover (TTS)
 # ---------------------------------------------------------------------------
-async def synth_voice(script: str, voice_id: str, out_path: str) -> None:
+async def synth_voice(script: str, voice_id: str, out_path: str, speed: float = 1.0) -> None:
     voice = VOICE_MAP.get(voice_id, VOICE_MAP["onyx"])["openai"]
     tts = OpenAITextToSpeech(api_key=EMERGENT_LLM_KEY)
     text = re.sub(r"\s+", " ", script).strip()[:4000]
-    audio = await tts.generate_speech(text=text, model="tts-1-hd", voice=voice, response_format="mp3")
+    spd = max(0.5, min(1.5, float(speed)))
+    audio = await tts.generate_speech(text=text, model="tts-1-hd", voice=voice,
+                                      speed=spd, response_format="mp3")
     with open(out_path, "wb") as f:
         f.write(audio)
 
@@ -157,7 +172,9 @@ def _ass_header(fontsize: int, alignment: int, marginv: int) -> str:
         f"Style: Cap,Barlow Condensed,{fontsize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,"
         f"-1,0,0,0,100,100,1,0,1,7,3,{alignment},120,120,{marginv},1\n"
         "Style: WM,Barlow Condensed,46,&H2EFFFFFF,&H2EFFFFFF,&H80000000,&H00000000,"
-        "0,0,0,0,100,100,2,0,1,2,0,8,60,60,60,1\n\n"
+        "0,0,0,0,100,100,2,0,1,2,0,8,60,60,60,1\n"
+        "Style: Hook,Barlow Condensed,96,&H0000E5FF,&H0000E5FF,&H00000000,&H64000000,"
+        "-1,0,0,0,100,100,1,0,1,8,2,8,80,80,560,1\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
@@ -176,7 +193,8 @@ def _fmt_time(t: float) -> str:
 
 
 def build_ass(words, duration, caption_style: str, out_path: str,
-              position: str = "center", size: str = "m", watermark: str = "") -> None:
+              position: str = "center", size: str = "m", watermark: str = "",
+              hook_text: str = "") -> None:
     color = CAPTION_MAP.get(caption_style, CAPTION_MAP["signal"])["ass_color"]
     pos = CAPTION_POSITION_MAP.get(position, CAPTION_POSITION_MAP["center"])
     sz = CAPTION_SIZE_MAP.get(size, CAPTION_SIZE_MAP["m"])
@@ -190,8 +208,16 @@ def build_ass(words, duration, caption_style: str, out_path: str,
             f"Dialogue: 1,{_fmt_time(0)},{_fmt_time(total)},WM,,0,0,0,,{_ass_escape(wm)}\n"
         )
 
+    hk = _ass_escape((hook_text or "").strip().upper())
+    if hk:
+        hook_end = min(total, 1.9)
+        pop = "{\\fad(120,300)\\fscx55\\fscy55\\t(0,220,\\fscx104\\fscy104)\\t(220,360,\\fscx100\\fscy100)}"
+        lines.append(
+            f"Dialogue: 2,{_fmt_time(0.12)},{_fmt_time(hook_end)},Hook,,0,0,0,,{pop}{hk}\n"
+        )
+
     if not words:
-        # Fallback: no timestamps -> keep watermark only (video still renders).
+        # Fallback: no timestamps -> keep watermark/hook only (video still renders).
         Path(out_path).write_text("".join(lines), encoding="utf-8")
         return
 
@@ -237,7 +263,8 @@ def _sanitize_watermark(text: str) -> str:
 
 
 async def render_video(audio_path: str, ass_name: str, bg_theme: str, duration: float,
-                       workdir: str, out_path: str, music_id: str = "none") -> None:
+                       workdir: str, out_path: str, music_id: str = "none",
+                       music_volume: float = MUSIC_VOLUME) -> None:
     theme = BG_MAP.get(bg_theme, BG_MAP["ember"])
     c = theme["colors"]
     dur = max(1.0, float(duration))
@@ -260,9 +287,10 @@ async def render_video(audio_path: str, ass_name: str, bg_theme: str, duration: 
 
     inputs = ["-f", "lavfi", "-i", grad, "-i", audio_path]
     if music_path:
+        vol = max(0.0, min(1.0, float(music_volume)))
         inputs += ["-stream_loop", "-1", "-i", music_path]
         achain = (
-            f"[1:a]volume=1.0[va];[2:a]volume={MUSIC_VOLUME}[ma];"
+            f"[1:a]volume=1.0[va];[2:a]volume={vol:.3f}[ma];"
             f"[va][ma]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]"
         )
         filter_complex = f"{vchain};{achain}"

@@ -74,3 +74,11 @@ MUSIC_TRACKS = [
 ]
 MUSIC_MAP = {m["id"]: m for m in MUSIC_TRACKS}
 MUSIC_VOLUME = 0.13
+
+# Narration pace -> OpenAI TTS speed multiplier.
+VOICE_SPEEDS = [
+    {"id": "slow", "name": "Slow", "speed": 0.85},
+    {"id": "normal", "name": "Normal", "speed": 1.0},
+    {"id": "fast", "name": "Fast", "speed": 1.15},
+]
+VOICE_SPEED_MAP = {s["id"]: s for s in VOICE_SPEEDS}

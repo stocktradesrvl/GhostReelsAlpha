@@ -1,6 +1,7 @@
 const BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api`;
 
 export type Voice = { id: string; name: string; tagline: string };
+export type VoiceSpeed = { id: string; name: string };
 export type CaptionStyle = { id: string; name: string; hint: string; hex: string };
 export type CaptionPosition = { id: string; name: string };
 export type CaptionSize = { id: string; name: string };
@@ -8,6 +9,7 @@ export type BgTheme = { id: string; name: string; preview: string[] };
 export type MusicTrack = { id: string; name: string };
 export type Config = {
   voices: Voice[];
+  voice_speeds: VoiceSpeed[];
   caption_styles: CaptionStyle[];
   caption_positions: CaptionPosition[];
   caption_sizes: CaptionSize[];
@@ -27,12 +29,15 @@ export type Reel = {
   script: string | null;
   seconds: number;
   voice_id: string;
+  voice_speed: string;
   caption_style: string;
   caption_position: string;
   caption_size: string;
   bg_theme: string;
   music_id: string;
+  music_volume: number;
   watermark: string | null;
+  hook_enabled: boolean;
   status: ReelStatus;
   progress: number;
   stage_label: string;
