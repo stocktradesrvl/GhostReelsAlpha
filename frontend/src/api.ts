@@ -131,6 +131,8 @@ export const api = {
   login: (email: string, password: string) =>
     req<{ access_token: string; user: UserProfile }>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   me: () => req<UserProfile>("/auth/me"),
+  syncSubscription: (is_subscribed: boolean) =>
+    req<UserProfile>("/subscription/sync", { method: "POST", body: JSON.stringify({ is_subscribed }) }),
   getConfig: () => req<Config>("/config"),
   generateScript: (topic: string, seconds: number) =>
     req<{ script: string; word_count: number }>("/script", {

@@ -163,6 +163,14 @@ async def consume_quota(user: dict):
         await db.users.update_one({"id": user["id"]}, {"$inc": {"free_used": 1}})
 
 
+async def owned_reel(reel_id: str, user: dict) -> dict:
+    """Fetch a reel and assert the requester owns it (404 if not, to avoid leaking existence)."""
+    reel = await db.reels.find_one({"id": reel_id})
+    if not reel or reel.get("user_id") != user["id"]:
+        raise HTTPException(404, "Reel not found")
+    return reel
+
+
 async def apply_owner_keys(reel: dict):
     """Load the reel owner's BYOK keys into the pipeline for this generation."""
     oa = gk = ""
@@ -294,6 +302,10 @@ class TestKeysRequest(BaseModel):
 class AuthIn(BaseModel):
     email: str
     password: str
+
+
+class SubscriptionSync(BaseModel):
+    is_subscribed: bool
 
 
 PUBLIC_FIELDS = {
@@ -848,18 +860,14 @@ async def list_reels(user=Depends(current_user)):
 
 
 @api_router.get("/reels/{reel_id}")
-async def get_reel(reel_id: str):
-    doc = await db.reels.find_one({"id": reel_id})
-    if not doc:
-        raise HTTPException(404, "Reel not found")
+async def get_reel(reel_id: str, user=Depends(current_user)):
+    doc = await owned_reel(reel_id, user)
     return public_reel(doc)
 
 
 @api_router.delete("/reels/{reel_id}")
-async def delete_reel(reel_id: str):
-    doc = await db.reels.find_one({"id": reel_id})
-    if not doc:
-        raise HTTPException(404, "Reel not found")
+async def delete_reel(reel_id: str, user=Depends(current_user)):
+    await owned_reel(reel_id, user)
     await db.reels.delete_one({"id": reel_id})
     for p in (MEDIA_DIR / f"{reel_id}.mp4", MEDIA_DIR / f"{reel_id}.jpg"):
         if p.exists():
@@ -1034,10 +1042,8 @@ async def get_outro_video(outro_id: str):
 
 
 @api_router.get("/reels/{reel_id}/scenes")
-async def get_scenes(reel_id: str):
-    doc = await db.reels.find_one({"id": reel_id})
-    if not doc:
-        raise HTTPException(404, "Reel not found")
+async def get_scenes(reel_id: str, user=Depends(current_user)):
+    doc = await owned_reel(reel_id, user)
     scenes = doc.get("scenes") or []
     editable = bool(doc.get("visual_mode") == "ai" and doc.get("audio_path") and scenes)
     return {
@@ -1066,10 +1072,8 @@ async def get_scene_image(reel_id: str, index: int):
 
 
 @api_router.post("/reels/{reel_id}/scene/{index}/regenerate")
-async def regenerate_scene(reel_id: str, index: int, req: SceneRegenRequest):
-    doc = await db.reels.find_one({"id": reel_id})
-    if not doc:
-        raise HTTPException(404, "Reel not found")
+async def regenerate_scene(reel_id: str, index: int, req: SceneRegenRequest, user=Depends(current_user)):
+    doc = await owned_reel(reel_id, user)
     scenes = doc.get("scenes") or []
     if doc.get("visual_mode") != "ai" or not doc.get("audio_path") or not scenes:
         raise HTTPException(400, "This reel doesn't support scene editing")
@@ -1086,10 +1090,8 @@ async def regenerate_scene(reel_id: str, index: int, req: SceneRegenRequest):
 
 
 @api_router.get("/reels/{reel_id}/lines")
-async def get_lines(reel_id: str):
-    doc = await db.reels.find_one({"id": reel_id})
-    if not doc:
-        raise HTTPException(404, "Reel not found")
+async def get_lines(reel_id: str, user=Depends(current_user)):
+    doc = await owned_reel(reel_id, user)
     segments = doc.get("segments") or []
     editable = bool(doc.get("audio_path") and segments)
     return {
@@ -1100,10 +1102,8 @@ async def get_lines(reel_id: str):
 
 
 @api_router.post("/reels/{reel_id}/line/{index}/regenerate")
-async def regenerate_line(reel_id: str, index: int, req: LineRegenRequest):
-    doc = await db.reels.find_one({"id": reel_id})
-    if not doc:
-        raise HTTPException(404, "Reel not found")
+async def regenerate_line(reel_id: str, index: int, req: LineRegenRequest, user=Depends(current_user)):
+    doc = await owned_reel(reel_id, user)
     segments = doc.get("segments") or []
     if not doc.get("audio_path") or not segments:
         raise HTTPException(400, "This reel doesn't support line editing")
@@ -1160,6 +1160,18 @@ async def login(body: AuthIn):
 @api_router.get("/auth/me")
 async def auth_me(user=Depends(current_user)):
     return public_user(user)
+
+
+@api_router.post("/subscription/sync")
+async def sync_subscription(body: SubscriptionSync, user=Depends(current_user)):
+    """Sync the RevenueCat-verified `pro` entitlement (source of truth = the SDK on device)
+    into the user record so the server-side free-reel quota unlocks for subscribers."""
+    await db.users.update_one(
+        {"id": user["id"]}, {"$set": {"is_subscribed": bool(body.is_subscribed)}}
+    )
+    logger.info("subscription/sync user=%s -> is_subscribed=%s", user["id"], bool(body.is_subscribed))
+    fresh = await db.users.find_one({"id": user["id"]})
+    return public_user(fresh)
 
 
 @api_router.get("/settings")

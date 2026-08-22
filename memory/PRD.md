@@ -138,12 +138,34 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
 - P2: retry queue durability across server restarts; per-user library (auth).
 
 ## Next tasks
-- **Phase D — RevenueCat subscriptions (planned next):** wire in-app subscriptions; on entitlement,
-  set `users.is_subscribed=true` (the quota gate already honours `is_subscribed` for unlimited generation).
-  Needs a native build to test. Skipped Stripe for now.
 - **Optional hardening (flagged by tester):** scope `GET /reels/{id}`, `/video`, `/thumb`, `/view`,
   `/download`, `DELETE /reels/{id}`, and the scene/line regenerate endpoints by `user_id` (currently
   those reads/actions are uuid-guarded but not auth-scoped).
+- **Full auto-upload** (YouTube/Meta OAuth) — deferred by user until the app has a store build.
+
+## RevenueCat subscriptions (2026-06 · batch 13 · forked) — DONE
+- **Emergent-managed RevenueCat** provisioned via integration proxy (`/setup`): project `proja26f3c2c`,
+  entitlement `pro`, offering `default`, packages `$rc_monthly` ($9.99/P1M) + `$rc_annual` ($79.99/P1Y).
+  SDK keys written to `frontend/.env` (`EXPO_PUBLIC_REVENUECAT_TEST/IOS/ANDROID_API_KEY`). Durable facts
+  in `/app/memory/revenuecat.md`.
+- **Frontend**: `react-native-purchases` + `react-native-purchases-ui` + `@tanstack/react-query`.
+  `src/revenuecat.tsx` = `SubscriptionProvider`/`useSubscription` (customer-info + offerings + app-user-id
+  queries, purchase/restore mutations, customer-info listener). SDK init at module scope in `_layout.tsx`
+  (try/catch). `RCIdentityBridge` in `_layout` binds `Purchases.logIn(user.id)` on every auth path and
+  syncs the SDK-verified `pro` entitlement to the backend.
+  - **Identity note**: on the web (purchases-js) SDK `originalAppUserId` stays anonymous after `logIn`, so
+    `identityReady`/the purchase choke point use `Purchases.getAppUserID()` (the current id) instead.
+  - New **`app/paywall.tsx`** (modal): coded paywall (prices from offerings, never hardcoded), custom
+    confirm modal (no Alert), Restore button, identity gate, unavailable/empty-offering + userCancelled
+    handling, "simulated" label in dev. Reached from Settings PLAN section (`subscribe-button`) and the
+    Create quota banner (`quota-banner` → `/paywall`).
+- **Backend**: `POST /api/subscription/sync {is_subscribed}` (auth-scoped) sets `users.is_subscribed`.
+  The existing `enforce_quota`/`consume_quota` gate already grants unlimited generation when
+  `is_subscribed` (or BYOK) is true. Sync gated client-side on `customerInfo` having resolved to avoid a
+  loading-state `false` clobbering a real entitlement.
+- **Verified (web Test Store, self-tested)**: SDK init in Browser Mode ✓, real offerings render ✓,
+  identity binds ✓, Test Store checkout → `pro` active → `isSubscribed=true` ✓, backend synced
+  `is_subscribed=True` in Mongo ✓ (then reset to clean). **Real device purchases require a native build.**
 
 ## Monetization foundation (2026-08 · batch 12 · forked) — Auth + Quota + per-user encrypted BYOK
 - **Auth**: email+password, bcrypt hashes, JWT (30-day) via `Authorization: Bearer`. `users` collection

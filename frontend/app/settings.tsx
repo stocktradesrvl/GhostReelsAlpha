@@ -309,10 +309,19 @@ export default function SettingsScreen() {
           )}
           <Text style={styles.aboutText}>
             Faceless AI Reels turns any topic into a TikTok-ready vertical video.{"\n\n"}
-            Out of free reels? Paste your own OpenAI/Google key above to generate freely, or subscribe (coming soon).
+            Out of free reels? Subscribe for unlimited generation, or paste your own OpenAI/Google key above to generate freely.
           </Text>
           {!!user && <Text style={styles.version}>Signed in as {user.email} · v1.0</Text>}
         </View>
+        {!user?.has_own_key && (
+          <PrimaryButton
+            testID="subscribe-button"
+            label={user?.is_subscribed ? "Manage subscription" : "Subscribe — unlimited reels"}
+            icon={user?.is_subscribed ? "checkmark-circle-outline" : "rocket-outline"}
+            onPress={() => { haptic.select(); router.push("/paywall"); }}
+            style={{ marginTop: spacing.md }}
+          />
+        )}
         <PrimaryButton
           testID="signout-button"
           variant="ghost"

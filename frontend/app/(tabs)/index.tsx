@@ -305,9 +305,9 @@ export default function CreateScreen() {
         )}
 
         {quotaHit && (
-          <Pressable testID="quota-banner" onPress={() => router.push("/settings")} style={styles.creditBanner}>
+          <Pressable testID="quota-banner" onPress={() => router.push("/paywall")} style={styles.creditBanner}>
             <Ionicons name="lock-closed" size={16} color={colors.warning} />
-            <Text style={styles.creditText}>You've used your free reels. Tap to add your own key or subscribe in Settings.</Text>
+            <Text style={styles.creditText}>You've used your free reels. Tap to subscribe for unlimited, or add your own key in Settings.</Text>
           </Pressable>
         )}
 
