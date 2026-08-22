@@ -7,7 +7,7 @@ import { ActivityIndicator, Alert, Linking, Modal, Pressable, StyleSheet, Text, 
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { api, AppSettings, Config, PRIVACY_POLICY_URL, SUPPORT_EMAIL } from "@/src/api";
+import { api, AppSettings, Config, PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL, SUPPORT_EMAIL } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import OptionSheet, { SheetOption } from "@/src/components/OptionSheet";
 import OutroSheet from "@/src/components/OutroSheet";
@@ -45,6 +45,12 @@ export default function SettingsScreen() {
     haptic.select();
     try { await WebBrowser.openBrowserAsync(PRIVACY_POLICY_URL); }
     catch { Linking.openURL(PRIVACY_POLICY_URL); }
+  }, []);
+
+  const openTerms = useCallback(async () => {
+    haptic.select();
+    try { await WebBrowser.openBrowserAsync(TERMS_OF_SERVICE_URL); }
+    catch { Linking.openURL(TERMS_OF_SERVICE_URL); }
   }, []);
 
   const openSupport = useCallback(() => {
@@ -367,6 +373,14 @@ export default function SettingsScreen() {
             <View style={styles.settingLeft}>
               <Ionicons name="shield-checkmark-outline" size={18} color={colors.onSurfaceSecondary} />
               <Text style={styles.settingLabel}>Privacy Policy</Text>
+            </View>
+            <Ionicons name="open-outline" size={16} color={colors.onSurfaceSecondary} />
+          </Pressable>
+          <View style={styles.linkDivider} />
+          <Pressable testID="terms-link" onPress={openTerms} style={styles.linkRow}>
+            <View style={styles.settingLeft}>
+              <Ionicons name="document-text-outline" size={18} color={colors.onSurfaceSecondary} />
+              <Text style={styles.settingLabel}>Terms of Service</Text>
             </View>
             <Ionicons name="open-outline" size={16} color={colors.onSurfaceSecondary} />
           </Pressable>

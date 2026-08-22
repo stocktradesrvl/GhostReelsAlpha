@@ -1,6 +1,7 @@
 const BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api`;
 
 export const PRIVACY_POLICY_URL = `${BASE}/legal/privacy`;
+export const TERMS_OF_SERVICE_URL = `${BASE}/legal/terms`;
 export const SUPPORT_EMAIL = "russngina@gmail.com";
 
 export type Voice = { id: string; name: string; tagline: string };
