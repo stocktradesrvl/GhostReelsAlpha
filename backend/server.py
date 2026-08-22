@@ -208,7 +208,14 @@ ACCESS_MIN = 60 * 24 * 30  # 30-day mobile sessions
 AES_KEY = base64.b64decode(os.environ["AES_SECRET_B64"])
 DUMMY_HASH = bcrypt.hashpw(b"dummy-password", bcrypt.gensalt()).decode()
 FREE_LIMIT = 3
+# Owner/admin emails get durable unlimited generation (never reset by the
+# RevenueCat client sync, which only touches `is_subscribed`).
+ADMIN_EMAILS = {"russngina@gmail.com"}
 bearer = HTTPBearer(auto_error=False)
+
+
+def is_admin_user(u: dict) -> bool:
+    return bool(u.get("is_admin")) or (u.get("email", "").strip().lower() in ADMIN_EMAILS)
 
 
 def hash_pw(p: str) -> str:
@@ -276,6 +283,7 @@ def public_user(u: dict) -> dict:
         "id": u["id"], "email": u["email"],
         "free_used": u.get("free_used", 0), "free_limit": FREE_LIMIT,
         "is_subscribed": bool(u.get("is_subscribed")),
+        "is_admin": is_admin_user(u),
         "has_own_key": bool(oa or gk),
         "openai_key_set": bool(u.get("openai_key_enc")),
         "google_key_set": bool(u.get("google_key_enc")),
@@ -287,7 +295,7 @@ def public_user(u: dict) -> dict:
 
 async def enforce_quota(user: dict):
     oa, gk = user_keys(user)
-    if oa or gk or user.get("is_subscribed"):
+    if oa or gk or user.get("is_subscribed") or is_admin_user(user):
         return
     if user.get("free_used", 0) < FREE_LIMIT:
         return
@@ -299,7 +307,7 @@ async def enforce_quota(user: dict):
 
 async def consume_quota(user: dict):
     oa, gk = user_keys(user)
-    if not (oa or gk) and not user.get("is_subscribed"):
+    if not (oa or gk) and not user.get("is_subscribed") and not is_admin_user(user):
         await db.users.update_one({"id": user["id"]}, {"$inc": {"free_used": 1}})
 
 
@@ -938,7 +946,7 @@ async def create_reel(req: CreateReelRequest, user=Depends(current_user)):
 async def create_reels_batch(req: BatchReelRequest, user=Depends(current_user)):
     validate_settings(req)
     oa, gk = user_keys(user)
-    if not (oa or gk) and not user.get("is_subscribed"):
+    if not (oa or gk) and not user.get("is_subscribed") and not is_admin_user(user):
         raise HTTPException(402, "Batch generation needs your own OpenAI/Google key or a subscription.")
     topics = [t.strip() for t in (req.topics or []) if t.strip()]
     if not topics:

@@ -336,7 +336,9 @@ export default function SettingsScreen() {
         <View style={styles.aboutCard}>
           {user && (
             <Text style={styles.planLine}>
-              {user.is_subscribed
+              {user.is_admin
+                ? "✓ Admin — unlimited reels"
+                : user.is_subscribed
                 ? "✓ Subscribed — unlimited reels"
                 : user.has_own_key
                 ? "✓ Using your own API key — unlimited reels"
@@ -349,7 +351,7 @@ export default function SettingsScreen() {
           </Text>
           {!!user && <Text style={styles.version}>Signed in as {user.email} · v1.0</Text>}
         </View>
-        {!user?.has_own_key && (
+        {!user?.has_own_key && !user?.is_admin && (
           <PrimaryButton
             testID="subscribe-button"
             label={user?.is_subscribed ? "Manage subscription" : "Subscribe — unlimited reels"}

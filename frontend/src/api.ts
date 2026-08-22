@@ -102,7 +102,7 @@ export function setAuthToken(t: string | null) { authToken = t; }
 
 export type UserProfile = {
   id: string; email: string;
-  free_used: number; free_limit: number; is_subscribed: boolean;
+  free_used: number; free_limit: number; is_subscribed: boolean; is_admin?: boolean;
   has_own_key: boolean; openai_key_set: boolean; google_key_set: boolean;
   openai_key_masked: string; google_key_masked: string; brand_handle: string;
 };
