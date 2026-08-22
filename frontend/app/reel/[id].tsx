@@ -36,6 +36,7 @@ export default function ReelDetail() {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const celebrated = useRef(false);
+  const viewed = useRef(false);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -51,6 +52,10 @@ export default function ReelDetail() {
       if (r.status === "ready" && !celebrated.current) {
         celebrated.current = true;
         haptic.success();
+      }
+      if (r.status === "ready" && !viewed.current) {
+        viewed.current = true;
+        api.addView(r.id).then((res) => setReel((cur) => (cur ? { ...cur, views: res.views } : cur))).catch(() => {});
       }
       if (r.status !== "ready" && r.status !== "failed") {
         timer.current = setTimeout(poll, 1500);
@@ -85,6 +90,7 @@ export default function ReelDetail() {
       } else {
         showToast("Sharing isn't available here.");
       }
+      api.addDownload(id).then((r) => setReel((cur) => (cur ? { ...cur, downloads: r.downloads } : cur))).catch(() => {});
     } catch {
       haptic.error();
       showToast("Couldn't export. Try again.");
@@ -115,6 +121,7 @@ export default function ReelDetail() {
       await MediaLibrary.saveToLibraryAsync(uri);
       haptic.success();
       showToast("Saved to your gallery ✓");
+      api.addDownload(id).then((r) => setReel((cur) => (cur ? { ...cur, downloads: r.downloads } : cur))).catch(() => {});
     } catch {
       haptic.error();
       showToast("Couldn't save. Try Share instead.");
@@ -140,6 +147,8 @@ export default function ReelDetail() {
         caption_anim: reel.caption_anim,
         bg_theme: reel.bg_theme,
         bg_motion: reel.bg_motion,
+        custom_c1: reel.custom_c1 || undefined,
+        custom_c2: reel.custom_c2 || undefined,
         music_id: reel.music_id,
         music_volume: reel.music_volume,
         watermark: reel.watermark || undefined,
@@ -221,9 +230,19 @@ export default function ReelDetail() {
             </View>
           )}
           <View style={[styles.actions, { paddingBottom: insets.bottom + spacing.md }]}>
-            <Text style={styles.meta}>
-              {reel?.duration ? `${reel.duration.toFixed(0)}s` : ""} · 1080×1920 · {reel?.word_count || 0} words
-            </Text>
+            <View style={styles.statsRow}>
+              <Text style={styles.meta}>
+                {reel?.duration ? `${reel.duration.toFixed(0)}s` : ""} · 1080×1920
+              </Text>
+              <View style={styles.statChip}>
+                <Ionicons name="eye-outline" size={14} color={colors.onSurfaceSecondary} />
+                <Text style={styles.statTxt} testID="views-count">{reel?.views ?? 0}</Text>
+              </View>
+              <View style={styles.statChip}>
+                <Ionicons name="download-outline" size={14} color={colors.onSurfaceSecondary} />
+                <Text style={styles.statTxt} testID="downloads-count">{reel?.downloads ?? 0}</Text>
+              </View>
+            </View>
             {Platform.OS === "web" ? (
               <PrimaryButton
                 testID="export-button"
@@ -345,6 +364,9 @@ const styles = StyleSheet.create({
   },
   toastText: { fontFamily: font.bodySemi, fontSize: 13, color: colors.onSurface },
   meta: { fontFamily: font.bodyMed, fontSize: 12, color: colors.onSurfaceSecondary, textAlign: "center", marginBottom: spacing.md },
+  statsRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.md, marginBottom: spacing.md },
+  statChip: { flexDirection: "row", alignItems: "center", gap: 4 },
+  statTxt: { fontFamily: font.bodySemi, fontSize: 12, color: colors.onSurfaceSecondary },
   failIcon: {
     width: 64,
     height: 64,

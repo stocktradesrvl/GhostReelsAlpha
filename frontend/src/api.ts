@@ -25,7 +25,7 @@ export type Config = {
 
 export type ReelStatus =
   | "queued" | "scripting" | "voicing" | "captioning"
-  | "rendering" | "uploading" | "ready" | "failed";
+  | "rendering" | "uploading" | "ready" | "failed" | "scheduled";
 
 export type Reel = {
   id: string;
@@ -43,11 +43,16 @@ export type Reel = {
   caption_anim: string;
   bg_theme: string;
   bg_motion: string;
+  custom_c1: string | null;
+  custom_c2: string | null;
   music_id: string;
   music_volume: number;
   watermark: string | null;
   hook_enabled: boolean;
   endcard_text: string | null;
+  views: number;
+  downloads: number;
+  scheduled_at: string | null;
   status: ReelStatus;
   progress: number;
   stage_label: string;
@@ -92,6 +97,8 @@ export const api = {
   listReels: () => req<Reel[]>("/reels"),
   getReel: (id: string) => req<Reel>(`/reels/${id}`),
   deleteReel: (id: string) => req<{ ok: boolean }>(`/reels/${id}`, { method: "DELETE" }),
+  addView: (id: string) => req<{ views: number }>(`/reels/${id}/view`, { method: "POST" }),
+  addDownload: (id: string) => req<{ downloads: number }>(`/reels/${id}/download`, { method: "POST" }),
   videoUrl: (id: string) => `${BASE}/reels/${id}/video`,
   thumbUrl: (id: string) => `${BASE}/reels/${id}/thumb`,
   voicePreviewUrl: (voiceId: string) => `${BASE}/voices/${voiceId}/preview`,

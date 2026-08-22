@@ -294,11 +294,22 @@ def _sanitize_watermark(text: str) -> str:
     return text[:32]
 
 
+def _hex_to_ff(h: str):
+    h = (h or "").strip().lstrip("#")
+    if len(h) == 6 and all(ch in "0123456789abcdefABCDEF" for ch in h):
+        return "0x" + h.upper()
+    return None
+
+
 async def render_video(audio_path: str, ass_name: str, bg_theme: str, duration: float,
                        workdir: str, out_path: str, music_id: str = "none",
-                       music_volume: float = MUSIC_VOLUME, bg_motion: str = "subtle") -> None:
-    theme = BG_MAP.get(bg_theme, BG_MAP["ember"])
-    c = theme["colors"]
+                       music_volume: float = MUSIC_VOLUME, bg_motion: str = "subtle",
+                       custom_colors=None) -> None:
+    if bg_theme == "custom" and custom_colors and len(custom_colors) == 2:
+        c1, c2 = _hex_to_ff(custom_colors[0]), _hex_to_ff(custom_colors[1])
+        c = ["0x09090B", c2, c1, "0x18181B"] if (c1 and c2) else BG_MAP["ember"]["colors"]
+    else:
+        c = BG_MAP.get(bg_theme, BG_MAP["ember"])["colors"]
     dur = max(1.0, float(duration))
     speed = BG_MOTION_MAP.get(bg_motion, BG_MOTION_MAP["subtle"])["speed"]
 

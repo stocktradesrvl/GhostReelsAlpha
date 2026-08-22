@@ -38,6 +38,8 @@ export default function CreateScreen() {
   const [captionAnim, setCaptionAnim] = useState("pop");
   const [bgTheme, setBgTheme] = useState("ember");
   const [bgMotion, setBgMotion] = useState("subtle");
+  const [customC1, setCustomC1] = useState("#22D3EE");
+  const [customC2, setCustomC2] = useState("#7C3AED");
   const [musicId, setMusicId] = useState("none");
   const [musicVolume, setMusicVolume] = useState(0.13);
   const [watermark, setWatermark] = useState("");
@@ -59,6 +61,7 @@ export default function CreateScreen() {
     caption_position: captionPosition, caption_size: captionSize, caption_font: captionFont,
     caption_anim: captionAnim, bg_theme: bgTheme, bg_motion: bgMotion, music_id: musicId,
     music_volume: musicVolume, watermark, hook_enabled: hookEnabled, endcard_text: endcardText,
+    custom_c1: customC1, custom_c2: customC2,
   };
 
   const applySettings = useCallback((s: Record<string, any>) => {
@@ -72,6 +75,8 @@ export default function CreateScreen() {
     if (s.caption_anim) setCaptionAnim(s.caption_anim);
     if (s.bg_theme) setBgTheme(s.bg_theme);
     if (s.bg_motion) setBgMotion(s.bg_motion);
+    if (s.custom_c1) setCustomC1(s.custom_c1);
+    if (s.custom_c2) setCustomC2(s.custom_c2);
     if (s.music_id) setMusicId(s.music_id);
     if (s.music_volume != null) setMusicVolume(s.music_volume);
     setWatermark(s.watermark || "");
@@ -108,6 +113,8 @@ export default function CreateScreen() {
       setCaptionAnim(r.caption_anim);
       setBgTheme(r.bg_theme);
       setBgMotion(r.bg_motion);
+      if (r.custom_c1) setCustomC1(r.custom_c1);
+      if (r.custom_c2) setCustomC2(r.custom_c2);
       setMusicId(r.music_id);
       setMusicVolume(r.music_volume);
       setWatermark(r.watermark || "");
@@ -142,8 +149,10 @@ export default function CreateScreen() {
     config?.voices.map((v) => ({ id: v.id, title: v.name, subtitle: v.tagline })) || [];
   const captionOptions: SheetOption[] =
     config?.caption_styles.map((c) => ({ id: c.id, title: c.name, subtitle: c.hint, dot: c.hex })) || [];
-  const bgOptions: SheetOption[] =
-    config?.bg_themes.map((b) => ({ id: b.id, title: b.name, swatch: b.preview })) || [];
+  const bgOptions: SheetOption[] = [
+    ...(config?.bg_themes.map((b) => ({ id: b.id, title: b.name, swatch: b.preview })) || []),
+    { id: "custom", title: "Custom colours", swatch: [customC2, customC1] },
+  ];
   const musicOptions: SheetOption[] =
     config?.music_tracks.map((m) => ({ id: m.id, title: m.name })) || [];
 
@@ -188,6 +197,8 @@ export default function CreateScreen() {
         caption_anim: captionAnim,
         bg_theme: bgTheme,
         bg_motion: bgMotion,
+        custom_c1: bgTheme === "custom" ? customC1 : undefined,
+        custom_c2: bgTheme === "custom" ? customC2 : undefined,
         music_id: musicId,
         music_volume: musicVolume,
         watermark: watermark.trim() || undefined,
@@ -202,7 +213,7 @@ export default function CreateScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [canGenerate, mode, topic, script, seconds, voiceId, voiceSpeed, captionStyle, captionPosition, captionSize, captionFont, captionAnim, bgTheme, bgMotion, musicId, musicVolume, watermark, hookEnabled, endcardText, router]);
+  }, [canGenerate, mode, topic, script, seconds, voiceId, voiceSpeed, captionStyle, captionPosition, captionSize, captionFont, captionAnim, bgTheme, bgMotion, customC1, customC2, musicId, musicVolume, watermark, hookEnabled, endcardText, router]);
 
   return (
     <View style={styles.root}>
@@ -347,8 +358,8 @@ export default function CreateScreen() {
             testID="setting-bg"
             icon="color-palette"
             label="Background"
-            value={bg?.name || "—"}
-            swatch={bg?.preview}
+            value={bgTheme === "custom" ? "Custom" : (bg?.name || "—")}
+            swatch={bgTheme === "custom" ? [customC2, customC1] : bg?.preview}
             onPress={() => bgSheet.current?.present()}
           />
           <SettingRow
@@ -428,6 +439,16 @@ export default function CreateScreen() {
           value={bgMotion}
           onChange={setBgMotion}
         />
+
+        {bgTheme === "custom" && (
+          <>
+            <Text style={styles.section}>CUSTOM GRADIENT · HEX</Text>
+            <View style={styles.colorRow}>
+              <ColorField testID="custom-c1" value={customC1} onChange={setCustomC1} />
+              <ColorField testID="custom-c2" value={customC2} onChange={setCustomC2} />
+            </View>
+          </>
+        )}
 
         <View style={styles.toggleRow}>
           <View style={styles.settingLeft}>
@@ -586,6 +607,36 @@ function ChipSelector({
   );
 }
 
+function ColorField({
+  value,
+  onChange,
+  testID,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  testID?: string;
+}) {
+  const v = value.trim();
+  const valid = /^#?[0-9a-fA-F]{6}$/.test(v);
+  const swatch = valid ? (v.startsWith("#") ? v : `#${v}`) : "#000000";
+  return (
+    <View style={styles.colorField}>
+      <View style={[styles.colorSwatch, { backgroundColor: swatch }]} />
+      <TextInput
+        testID={testID}
+        value={value}
+        onChangeText={onChange}
+        autoCapitalize="characters"
+        autoCorrect={false}
+        maxLength={7}
+        placeholder="#RRGGBB"
+        placeholderTextColor={colors.onSurfaceSecondary}
+        style={styles.colorInput}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.surface },
   header: {
@@ -656,6 +707,21 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
   chipRow: { flexDirection: "row", gap: spacing.sm },
+  colorRow: { flexDirection: "row", gap: spacing.sm },
+  colorField: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    height: 48,
+  },
+  colorSwatch: { width: 24, height: 24, borderRadius: 6, borderWidth: 1, borderColor: colors.borderStrong },
+  colorInput: { flex: 1, fontFamily: font.bodyMed, fontSize: 15, color: colors.onSurface },
   chip: {
     flex: 1,
     height: 44,

@@ -26,6 +26,7 @@ export default function BatchScreen() {
   const [bgTheme, setBgTheme] = useState("ember");
   const [musicId, setMusicId] = useState("none");
   const [hookEnabled, setHookEnabled] = useState(true);
+  const [whenMode, setWhenMode] = useState<"now" | "tonight">("now");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,20 +61,28 @@ export default function BatchScreen() {
     setError(null);
     setSubmitting(true);
     try {
-      await api.createBatch({
+      let scheduled_at: string | undefined;
+      if (whenMode === "tonight") {
+        const d = new Date();
+        d.setHours(2, 0, 0, 0);
+        if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+        scheduled_at = d.toISOString();
+      }
+      const res = await api.createBatch({
         topics, seconds, voice_id: voiceId, caption_font: captionFont,
         caption_anim: "pop", bg_theme: bgTheme, bg_motion: "dynamic",
-        music_id: musicId, hook_enabled: hookEnabled,
+        music_id: musicId, hook_enabled: hookEnabled, scheduled_at,
       });
       haptic.heavy();
       router.replace("/(tabs)/library");
+      return res;
     } catch (e: any) {
       setError(e.message || "Couldn't start the batch.");
       haptic.error();
     } finally {
       setSubmitting(false);
     }
-  }, [topics, seconds, voiceId, captionFont, bgTheme, musicId, hookEnabled, router]);
+  }, [topics, seconds, voiceId, captionFont, bgTheme, musicId, hookEnabled, whenMode, router]);
 
   return (
     <View style={styles.root}>
@@ -146,6 +155,18 @@ export default function BatchScreen() {
           <Switch testID="batch-hook-toggle" value={hookEnabled} onValueChange={(v) => { haptic.light(); setHookEnabled(v); }} trackColor={{ false: colors.surfaceTertiary, true: colors.brandPrimary }} thumbColor="#fff" />
         </View>
 
+        <Text style={styles.section}>WHEN</Text>
+        <View style={styles.chipRow}>
+          {[{ id: "now", name: "Generate now" }, { id: "tonight", name: "Tonight · 2 AM" }].map((o) => {
+            const active = o.id === whenMode;
+            return (
+              <Pressable key={o.id} testID={`batch-when-${o.id}`} onPress={() => { haptic.light(); setWhenMode(o.id as any); }} style={[styles.chip, active && styles.chipActive]}>
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>{o.name}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
         {!!error && (
           <View style={styles.errorBox} testID="batch-error">
             <Ionicons name="warning" size={16} color={colors.error} />
@@ -158,7 +179,7 @@ export default function BatchScreen() {
         <View style={[styles.ctaWrap, { paddingBottom: insets.bottom + spacing.sm }]}>
           <PrimaryButton
             testID="batch-generate-button"
-            label={topics.length > 1 ? `Generate ${topics.length} reels` : "Generate reel"}
+            label={whenMode === "tonight" ? `Schedule ${topics.length || 0} reel${topics.length === 1 ? "" : "s"}` : (topics.length > 1 ? `Generate ${topics.length} reels` : "Generate reel")}
             icon="layers"
             disabled={topics.length === 0}
             loading={submitting}

@@ -84,6 +84,8 @@ class ReelSettings(BaseModel):
     watermark: Optional[str] = None
     hook_enabled: bool = False
     endcard_text: Optional[str] = None
+    custom_c1: Optional[str] = None
+    custom_c2: Optional[str] = None
 
 
 class CreateReelRequest(ReelSettings):
@@ -95,13 +97,15 @@ class CreateReelRequest(ReelSettings):
 
 class BatchReelRequest(ReelSettings):
     topics: List[str] = []
+    scheduled_at: Optional[str] = None  # ISO time; if future, reels wait until then
 
 
 PUBLIC_FIELDS = {
     "id", "title", "input_mode", "topic", "script", "seconds", "voice_id", "voice_speed",
     "caption_style", "caption_position", "caption_size", "caption_font", "caption_anim",
-    "bg_theme", "bg_motion", "music_id", "music_volume", "watermark", "hook_enabled",
-    "endcard_text", "status", "progress", "stage_label", "error",
+    "bg_theme", "bg_motion", "custom_c1", "custom_c2", "music_id", "music_volume", "watermark",
+    "hook_enabled", "endcard_text", "views", "downloads", "scheduled_at",
+    "status", "progress", "stage_label", "error",
     "duration", "word_count", "has_video", "created_at", "updated_at",
 }
 
@@ -115,13 +119,20 @@ def validate_settings(s: ReelSettings):
         (s.caption_size, CAPTION_SIZE_MAP, "caption size"),
         (s.caption_font, CAPTION_FONT_MAP, "caption font"),
         (s.caption_anim, CAPTION_ANIM_MAP, "caption animation"),
-        (s.bg_theme, BG_MAP, "background theme"),
         (s.bg_motion, BG_MOTION_MAP, "background motion"),
         (s.music_id, MUSIC_MAP, "music track"),
     ]
     for value, table, label in checks:
         if value not in table:
             raise HTTPException(400, f"Unknown {label}")
+    if s.bg_theme != "custom" and s.bg_theme not in BG_MAP:
+        raise HTTPException(400, "Unknown background theme")
+    if s.bg_theme == "custom":
+        def _ok(h):
+            h = (h or "").strip().lstrip("#")
+            return len(h) == 6 and all(c in "0123456789abcdefABCDEF" for c in h)
+        if not (_ok(s.custom_c1) and _ok(s.custom_c2)):
+            raise HTTPException(400, "Custom theme needs two hex colours")
 
 
 def build_reel_doc(s: ReelSettings, input_mode: str, topic, script, title: str) -> dict:
@@ -142,11 +153,16 @@ def build_reel_doc(s: ReelSettings, input_mode: str, topic, script, title: str) 
         "caption_anim": s.caption_anim,
         "bg_theme": s.bg_theme,
         "bg_motion": s.bg_motion,
+        "custom_c1": (s.custom_c1 or None),
+        "custom_c2": (s.custom_c2 or None),
         "music_id": s.music_id,
         "music_volume": max(0.0, min(1.0, float(s.music_volume))),
         "watermark": (s.watermark or "").strip()[:32] or None,
         "hook_enabled": bool(s.hook_enabled),
         "endcard_text": (s.endcard_text or "").strip()[:40] or None,
+        "views": 0,
+        "downloads": 0,
+        "scheduled_at": None,
         "status": "queued",
         "progress": 0,
         "stage_label": "Queued",
@@ -220,6 +236,7 @@ async def run_pipeline(reel_id: str):
             music_id=reel.get("music_id", "none"),
             music_volume=reel.get("music_volume", 0.13),
             bg_motion=reel.get("bg_motion", "subtle"),
+            custom_colors=[reel.get("custom_c1"), reel.get("custom_c2")],
         )
         await pipeline.extract_thumbnail(out_path, thumb_path)
 
@@ -318,15 +335,51 @@ async def create_reels_batch(req: BatchReelRequest):
     if len(topics) > 12:
         raise HTTPException(400, "Up to 12 topics per batch")
 
+    # Determine scheduling.
+    sched_iso = None
+    now = datetime.now(timezone.utc)
+    if req.scheduled_at:
+        try:
+            when = datetime.fromisoformat(req.scheduled_at.replace("Z", "+00:00"))
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            if when > now:
+                sched_iso = when.isoformat()
+        except Exception:
+            sched_iso = None
+
     import asyncio
     created = []
     for topic in topics:
         title = topic[:48].strip()
         doc = build_reel_doc(req, "topic", topic, None, title)
+        if sched_iso:
+            doc["status"] = "scheduled"
+            doc["scheduled_at"] = sched_iso
+            doc["stage_label"] = "Scheduled"
         await db.reels.insert_one(doc)
-        asyncio.create_task(run_pipeline(doc["id"]))
+        if not sched_iso:
+            asyncio.create_task(run_pipeline(doc["id"]))
         created.append(public_reel(doc))
-    return {"created": created, "count": len(created)}
+    return {"created": created, "count": len(created), "scheduled": bool(sched_iso)}
+
+
+@api_router.post("/reels/{reel_id}/view")
+async def add_view(reel_id: str):
+    res = await db.reels.update_one({"id": reel_id}, {"$inc": {"views": 1}})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Reel not found")
+    doc = await db.reels.find_one({"id": reel_id})
+    return {"views": doc.get("views", 0)}
+
+
+@api_router.post("/reels/{reel_id}/download")
+async def add_download(reel_id: str):
+    res = await db.reels.update_one({"id": reel_id}, {"$inc": {"downloads": 1}})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Reel not found")
+    doc = await db.reels.find_one({"id": reel_id})
+    return {"downloads": doc.get("downloads", 0)}
 
 
 @api_router.get("/reels")
@@ -390,13 +443,32 @@ app.add_middleware(
 )
 
 
+async def scheduler_loop():
+    import asyncio
+    while True:
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            due = await db.reels.find(
+                {"status": "scheduled", "scheduled_at": {"$lte": now}}
+            ).to_list(50)
+            for d in due:
+                await update_reel(d["id"], status="queued", stage_label="Queued", progress=0)
+                asyncio.create_task(run_pipeline(d["id"]))
+                logger.info("Scheduled reel %s promoted to queue", d["id"])
+        except Exception as e:  # noqa: BLE001
+            logger.warning("scheduler error: %s", e)
+        await asyncio.sleep(30)
+
+
 @app.on_event("startup")
 async def startup():
+    import asyncio
     try:
         await run_in_threadpool(storage_client.init_storage)
         logger.info("Object storage initialised")
     except Exception as e:  # noqa: BLE001
         logger.warning("Object storage init failed (will retry on demand): %s", e)
+    asyncio.create_task(scheduler_loop())
 
 
 @app.on_event("shutdown")

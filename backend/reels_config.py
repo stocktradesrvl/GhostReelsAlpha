@@ -95,6 +95,9 @@ MUSIC_TRACKS = [
     {"id": "lofi", "name": "Lo-Fi Chill", "file": "chill.mp3"},
     {"id": "upbeat", "name": "Upbeat", "file": "upbeat.mp3"},
     {"id": "cinematic", "name": "Cinematic", "file": "cinematic.mp3"},
+    {"id": "dreamy", "name": "Dreamy", "file": "dreamy.mp3"},
+    {"id": "groove", "name": "Groove", "file": "groove.mp3"},
+    {"id": "focus", "name": "Focus", "file": "focus.mp3"},
 ]
 MUSIC_MAP = {m["id"]: m for m in MUSIC_TRACKS}
 MUSIC_VOLUME = 0.13

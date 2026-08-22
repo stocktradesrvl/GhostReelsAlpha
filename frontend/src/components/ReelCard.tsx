@@ -46,7 +46,7 @@ export default function ReelCard({ reel, onPress }: { reel: Reel; onPress: () =>
         {!showThumb && (
           <View style={styles.centerIcon}>
             <Ionicons
-              name={reel.status === "failed" ? "alert-circle" : "sync"}
+              name={reel.status === "failed" ? "alert-circle" : reel.status === "scheduled" ? "time-outline" : "sync"}
               size={30}
               color="rgba(255,255,255,0.85)"
             />

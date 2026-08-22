@@ -68,6 +68,12 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
   uses plain TextInput — BottomSheetTextInput crashes on RN-web); **Batch Generate** (`POST /api/reels/batch`
   turns up to 12 topics into individual reels; dedicated /batch screen). Render-level features verified via
   synthetic-audio renders (no LLM spend); frontend controls + preset save/apply verified.
+- **Follow-up (2026-08 · batch 6): Music Library** (6 CC0 beds: lofi/upbeat/cinematic/dreamy/groove/focus);
+  **Reel Analytics** (`views`/`downloads` counters; `POST /reels/{id}/view` & `/download`; shown on detail);
+  **Custom Colours** (`bg_theme='custom'` + `custom_c1`/`custom_c2` hex → 4-stop gradient; hex inputs in UI);
+  **Scheduled Batches** (`POST /reels/batch` accepts `scheduled_at`; reels wait as status `scheduled` until an
+  async scheduler_loop promotes them; Batch screen WHEN=Now/Tonight·2AM). Verified via synthetic renders +
+  UI screenshots; generation itself gated only by LLM key budget.
 
 ## Backlog
 - P1: multiple caption layout presets; background music track option; ElevenLabs voice option.
