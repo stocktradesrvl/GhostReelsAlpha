@@ -214,8 +214,7 @@ export default function CreateScreen() {
     }
   }, [topic, seconds]);
 
-  const canGenerate =
-    mode === "script" ? script.trim().length > 0 : topic.trim().length > 0 || script.trim().length > 0;
+  const canGenerate = script.trim().length > 0;
 
   const generate = useCallback(async () => {
     if (!canGenerate) return;
@@ -223,7 +222,7 @@ export default function CreateScreen() {
     setSubmitting(true);
     try {
       const reel = await api.createReel({
-        input_mode: mode,
+        input_mode: script.trim() ? "script" : mode,
         topic: mode === "topic" ? topic.trim() : undefined,
         script: script.trim() || undefined,
         seconds,
@@ -599,9 +598,12 @@ export default function CreateScreen() {
 
       <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
         <View style={[styles.ctaWrap, { paddingBottom: insets.bottom + spacing.sm }]}>
+          {mode === "topic" && !script.trim() && (
+            <Text style={styles.ctaHint}>Write the script first, review &amp; edit it, then build your reel.</Text>
+          )}
           <PrimaryButton
             testID="generate-reel-button"
-            label="Generate Reel"
+            label={script.trim() ? "Build Reel" : "Generate Reel"}
             icon="film"
             disabled={!canGenerate}
             loading={submitting}
@@ -907,5 +909,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.border,
+  },
+  ctaHint: {
+    fontFamily: font.body,
+    fontSize: 12,
+    color: colors.onSurfaceSecondary,
+    textAlign: "center",
+    marginBottom: spacing.sm,
   },
 });
