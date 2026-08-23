@@ -37,13 +37,32 @@ EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
 
 # Bring-Your-Own-Key: when the app owner saves their own provider keys in Settings,
 # generation uses THOSE keys (real OpenAI / Google) instead of the shared Emergent key,
-# lifting the shared budget cap. Updated by the backend from the app_settings doc.
-USER_KEYS = {"openai": "", "google": ""}
+# lifting the shared budget cap.
+#
+# These are stored in contextvars (NOT a plain module dict) so each concurrent
+# request / background generation task gets its OWN isolated copy. A plain global
+# dict was shared across all async tasks, so one request resetting the keys could
+# clobber another reel's keys mid-generation and silently fall back to the shared
+# Emergent key ("out of credits") even though the user had saved BYOK keys.
+import contextvars
+
+_USER_OPENAI: contextvars.ContextVar = contextvars.ContextVar("user_openai_key", default="")
+_USER_GOOGLE: contextvars.ContextVar = contextvars.ContextVar("user_google_key", default="")
+
+
+class _UserKeys:
+    """Backwards-compatible mapping view over the contextvars (USER_KEYS['openai'])."""
+
+    def __getitem__(self, k):
+        return _USER_OPENAI.get() if k == "openai" else _USER_GOOGLE.get()
+
+
+USER_KEYS = _UserKeys()
 
 
 def set_user_keys(openai_key: str = "", google_key: str = "") -> None:
-    USER_KEYS["openai"] = (openai_key or "").strip()
-    USER_KEYS["google"] = (google_key or "").strip()
+    _USER_OPENAI.set((openai_key or "").strip())
+    _USER_GOOGLE.set((google_key or "").strip())
 
 
 async def validate_openai_key(key: str) -> bool:

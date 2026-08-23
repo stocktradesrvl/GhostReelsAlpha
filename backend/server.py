@@ -267,13 +267,17 @@ def user_keys(user: dict) -> tuple:
     if user.get("openai_key_enc"):
         try:
             oa = dec_key(user["openai_key_enc"], user["id"], "openai")
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             oa = ""
+            logger.warning("BYOK openai decrypt FAILED for user=%s (%s) — falling back to shared key. "
+                           "AES secret likely changed; user must re-save their key.", user.get("id"), e)
     if user.get("google_key_enc"):
         try:
             gk = dec_key(user["google_key_enc"], user["id"], "google")
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             gk = ""
+            logger.warning("BYOK google decrypt FAILED for user=%s (%s) — falling back to shared key. "
+                           "AES secret likely changed; user must re-save their key.", user.get("id"), e)
     return oa, gk
 
 
@@ -1364,6 +1368,15 @@ async def appstore_icon():
     if not f.is_file():
         raise HTTPException(404, "not available")
     return FileResponse(str(f), media_type="image/png", filename="ghostreelsalpha-icon-1024.png")
+
+
+@api_router.get("/android-icon-512.png")
+async def android_icon_512():
+    """Google Play app icon: 512x512 PNG (<1MB), no wordmark."""
+    f = Path("/app/frontend/assets/images/android-icon-512.png")
+    if not f.is_file():
+        raise HTTPException(404, "not available")
+    return FileResponse(str(f), media_type="image/png", filename="ghostreelsalpha-icon-512.png")
 
 
 @api_router.get("/appstore-screenshots.zip")
