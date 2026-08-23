@@ -276,6 +276,44 @@ def is_admin_user(u: dict) -> bool:
     return bool(u.get("is_admin")) or (u.get("email", "").strip().lower() in ADMIN_EMAILS)
 
 
+# --- Content moderation (server-side prompt guardrail) -----------------------
+# Blocks clearly-disallowed requests (explicit sexual / CSAM, graphic violence &
+# self-harm, illegal-drug how-to) BEFORE any AI generation runs, so the app has a
+# real content guardrail (cleaner store content rating). Phrases use word
+# boundaries to avoid false positives on ordinary words.
+_BLOCKED_PATTERNS = re.compile(
+    r"\b("
+    # explicit sexual / CSAM / sexual violence
+    r"porn|pornographic|hardcore\s+sex|blowjob|handjob|deepthroat|gangbang|bukkake|creampie|"
+    r"child\s*porn|childporn|\bcp\b|pedophil\w*|paedophil\w*|\bloli\b|\bcsam\b|bestiality|zoophilia|"
+    r"rape|raping|molest\w*|non[-\s]?consensual|"
+    # graphic violence / self-harm / weapons how-to
+    r"behead\w*|dismember\w*|mutilat\w*|gore|torture\s+(?:someone|a\s+\w+)|"
+    r"how\s+to\s+kill|kill\s+(?:myself|yourself|him|her|them|people)|mass\s+shooting|school\s+shooting|"
+    r"suicide\s+(?:method|how|note|plan)|self[-\s]?harm|"
+    r"how\s+to\s+make\s+(?:a\s+)?(?:bomb|explosive|pipe\s*bomb)|build\s+a\s+bomb|"
+    # illegal-drug how-to / trade
+    r"heroin|cocaine|crack\s+cocaine|\bmeth\b|methamphetamine|crystal\s*meth|fentanyl|"
+    r"\bmdma\b|ecstasy|\blsd\b|how\s+to\s+(?:make|cook|synthesize)\s+(?:meth|drugs|cocaine)|"
+    r"buy\s+(?:illegal\s+)?drugs|sell\s+(?:illegal\s+)?drugs"
+    r")\b",
+    re.IGNORECASE,
+)
+
+MODERATION_MESSAGE = (
+    "This request can't be processed. It appears to reference explicit sexual, "
+    "graphic violent/self-harm, or illegal-drug content, which isn't allowed. "
+    "Please revise your topic or script."
+)
+
+
+def moderate_text(*texts: str) -> None:
+    """Raise HTTP 400 if any provided text hits the disallowed-content denylist."""
+    combined = " ".join(t for t in texts if t)
+    if combined.strip() and _BLOCKED_PATTERNS.search(combined):
+        raise HTTPException(400, MODERATION_MESSAGE)
+
+
 def hash_pw(p: str) -> str:
     return bcrypt.hashpw(p.encode()[:72], bcrypt.gensalt(12)).decode()
 
@@ -959,6 +997,7 @@ async def get_config():
 async def make_script(req: ScriptRequest, user=Depends(current_user)):
     if not req.topic.strip():
         raise HTTPException(400, "Topic is required")
+    moderate_text(req.topic)
     await enforce_quota(user)
     oa, gk = user_keys(user)
     pipeline.set_user_keys(oa, gk)
@@ -993,6 +1032,7 @@ async def create_reel(req: CreateReelRequest, user=Depends(current_user)):
         raise HTTPException(400, "Script is required")
     if req.input_mode == "topic" and not (topic or script):
         raise HTTPException(400, "Topic is required")
+    moderate_text(topic, script, req.endcard_text, req.custom_c1, req.custom_c2, req.watermark)
 
     title = (req.title or "").strip() or ((script or topic or "Untitled")[:48].strip())
     doc = build_reel_doc(req, req.input_mode, topic, script, title, user_id=user["id"])
@@ -1015,6 +1055,7 @@ async def create_reels_batch(req: BatchReelRequest, user=Depends(current_user)):
         raise HTTPException(400, "At least one topic is required")
     if len(topics) > 12:
         raise HTTPException(400, "Up to 12 topics per batch")
+    moderate_text(*topics)
 
     # Determine scheduling.
     sched_iso = None
@@ -1114,6 +1155,8 @@ async def create_series(req: SeriesCreate, user=Depends(current_user)):
     validate_settings(req)
     if not req.title.strip():
         raise HTTPException(400, "Series title is required")
+    moderate_text(req.title, req.premise, req.tone,
+                  *[c.name for c in req.characters], *[c.description for c in req.characters])
     settings = {k: getattr(req, k) for k in ReelSettings.model_fields}
     doc = {
         "id": str(uuid.uuid4()),
@@ -1135,6 +1178,7 @@ async def create_series(req: SeriesCreate, user=Depends(current_user)):
 async def suggest_series_characters(req: SuggestRequest, user=Depends(current_user)):
     if not req.premise.strip():
         raise HTTPException(400, "Premise is required")
+    moderate_text(req.premise, req.tone)
     oa, gk = user_keys(user)
     pipeline.set_user_keys(oa, gk)
     try:
@@ -1176,6 +1220,7 @@ async def create_series_episode(series_id: str, req: EpisodeRequest, user=Depend
     series = await db.series.find_one({"id": series_id, "user_id": user["id"]})
     if not series:
         raise HTTPException(404, "Series not found")
+    moderate_text(req.topic)
     await enforce_quota(user)
     s = ReelSettings(**(series.get("settings") or {}))
     ep = int(series.get("episode_count", 0)) + 1
@@ -1289,6 +1334,7 @@ async def regenerate_scene(reel_id: str, index: int, req: SceneRegenRequest, use
         raise HTTPException(400, "This reel doesn't support scene editing")
     if index < 0 or index >= len(scenes):
         raise HTTPException(404, "Scene not found")
+    moderate_text(req.prompt)
     if doc.get("status") not in ("ready", "failed"):
         raise HTTPException(409, "Reel is still processing")
 
@@ -1321,6 +1367,7 @@ async def regenerate_line(reel_id: str, index: int, req: LineRegenRequest, user=
         raise HTTPException(404, "Line not found")
     if not (req.text or "").strip():
         raise HTTPException(400, "Line text is required")
+    moderate_text(req.text)
     if doc.get("status") not in ("ready", "failed"):
         raise HTTPException(409, "Reel is still processing")
 
