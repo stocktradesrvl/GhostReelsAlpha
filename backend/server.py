@@ -1379,6 +1379,15 @@ async def android_icon_512():
     return FileResponse(str(f), media_type="image/png", filename="ghostreelsalpha-icon-512.png")
 
 
+@api_router.get("/android-feature-graphic.png")
+async def android_feature_graphic():
+    """Google Play feature graphic: 1024x500 PNG."""
+    f = Path("/app/frontend/appstore-screenshots/android/feature-graphic.png")
+    if not f.is_file():
+        raise HTTPException(404, "not available")
+    return FileResponse(str(f), media_type="image/png", filename="ghostreelsalpha-feature-graphic.png")
+
+
 @api_router.get("/appstore-screenshots.zip")
 async def appstore_screenshots_zip():
     """One-off download of the generated App Store screenshot sets (6.7\" + 6.5\")."""
