@@ -195,6 +195,64 @@ TERMS_OF_SERVICE_HTML = """<!doctype html>
 </html>"""
 
 
+DELETE_ACCOUNT_HTML = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>GhostReelsAlpha — Delete Your Account</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; background:#0A0A0A; color:#E7E5E4; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; line-height:1.6; }
+  .wrap { max-width:720px; margin:0 auto; padding:32px 20px 64px; }
+  h1 { font-size:26px; margin:0 0 4px; }
+  h2 { font-size:18px; margin:28px 0 8px; color:#F87171; }
+  p, li { font-size:15px; color:#D6D3D1; }
+  a { color:#F87171; }
+  .muted { color:#A8A29E; font-size:13px; }
+  ol, ul { padding-left:22px; }
+  li { margin-bottom:6px; }
+  hr { border:none; border-top:1px solid #292524; margin:28px 0; }
+  .card { background:#141414; border:1px solid #292524; border-radius:12px; padding:16px 18px; margin-top:16px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Delete Your Account</h1>
+    <p class="muted">GhostReelsAlpha — Faceless AI Reels. Last updated: June 2026.</p>
+    <p>You can permanently delete your GhostReelsAlpha account and all associated data at any time. Deletion is immediate and cannot be undone.</p>
+
+    <h2>Delete from within the app (recommended)</h2>
+    <ol>
+      <li>Open the <strong>GhostReelsAlpha</strong> app and sign in.</li>
+      <li>Go to the <strong>Settings</strong> tab (gear icon).</li>
+      <li>Scroll to the bottom and tap <strong>Delete account</strong>.</li>
+      <li>Confirm in the dialog. Your account is deleted right away and you are signed out.</li>
+    </ol>
+
+    <h2>Prefer email? Request deletion manually</h2>
+    <div class="card">
+      <p>If you can't access the app, email <a href="mailto:russngina@gmail.com?subject=Delete%20my%20GhostReelsAlpha%20account">russngina@gmail.com</a>
+      from the address associated with your account and ask us to delete it. We will remove your account and data within 30 days and confirm by email.</p>
+    </div>
+
+    <h2>What gets deleted</h2>
+    <p>Deleting your account permanently removes:</p>
+    <ul>
+      <li>Your account and email/login credentials</li>
+      <li>All reels you created (video, audio, captions, and images)</li>
+      <li>Your saved series and custom outros</li>
+      <li>Any API keys you added (stored encrypted), plus your app settings</li>
+    </ul>
+    <p class="muted">Note: an active paid subscription is billed and managed by the Google Play Store (or Apple App Store). Deleting your account does not cancel it — cancel the subscription separately in your store account settings.</p>
+
+    <hr/>
+    <p class="muted">Questions? Contact <a href="mailto:russngina@gmail.com">russngina@gmail.com</a>.</p>
+  </div>
+</body>
+</html>"""
+
+
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
@@ -1359,6 +1417,12 @@ async def privacy_policy():
 async def terms_of_service():
     """Public terms of service page linked from the app."""
     return HTMLResponse(content=TERMS_OF_SERVICE_HTML)
+
+
+@api_router.get("/legal/delete-account", response_class=HTMLResponse)
+async def delete_account_instructions():
+    """Public account-deletion instructions page (Google Play Data safety requirement)."""
+    return HTMLResponse(content=DELETE_ACCOUNT_HTML)
 
 
 @api_router.get("/appstore-icon.png")
