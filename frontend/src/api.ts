@@ -79,6 +79,8 @@ export type Reel = {
 export type Character = { name: string; description: string };
 export type Outro = { id: string; name: string; size: number; created_at: string };
 export type AppSettings = {
+  key_mode?: "own" | "builtin";
+  has_own_key?: boolean;
   openai_key_set: boolean;
   openai_key_masked: string;
   google_key_set: boolean;
@@ -103,6 +105,7 @@ export function setAuthToken(t: string | null) { authToken = t; }
 export type UserProfile = {
   id: string; email: string;
   free_used: number; free_limit: number; is_subscribed: boolean; is_admin?: boolean;
+  key_mode?: "own" | "builtin";
   has_own_key: boolean; openai_key_set: boolean; google_key_set: boolean;
   openai_key_masked: string; google_key_masked: string; brand_handle: string;
 };
@@ -192,7 +195,7 @@ export const api = {
     }),
   sceneImageUrl: (id: string, index: number) => `${BASE}/reels/${id}/scene/${index}/image`,
   getSettings: () => req<AppSettings>("/settings"),
-  updateSettings: (payload: { openai_key?: string; google_key?: string; brand_handle?: string }) =>
+  updateSettings: (payload: { openai_key?: string; google_key?: string; brand_handle?: string; key_mode?: "own" | "builtin" }) =>
     req<AppSettings>("/settings", { method: "PUT", body: JSON.stringify(payload) }),
   testKeys: (payload: { openai_key?: string; google_key?: string }) =>
     req<{ openai?: { ok: boolean; message: string }; google?: { ok: boolean; message: string } }>(

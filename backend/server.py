@@ -357,8 +357,8 @@ async def current_user(cred: HTTPAuthorizationCredentials = Depends(bearer)):
     return user
 
 
-def user_keys(user: dict) -> tuple:
-    """Return decrypted (openai, google) keys for a user, or ('','')."""
+def saved_keys(user: dict) -> tuple:
+    """Return decrypted (openai, google) keys actually stored for a user (ignores key_mode)."""
     oa = gk = ""
     if user.get("openai_key_enc"):
         try:
@@ -377,14 +377,24 @@ def user_keys(user: dict) -> tuple:
     return oa, gk
 
 
+def user_keys(user: dict) -> tuple:
+    """Effective (openai, google) keys for GENERATION. When key_mode == 'builtin' the user has
+    explicitly chosen the app's shared Universal credits, so return ('','') to use the Emergent key."""
+    if user.get("key_mode", "own") == "builtin":
+        return "", ""
+    return saved_keys(user)
+
+
 def public_user(u: dict) -> dict:
-    oa, gk = user_keys(u)
+    oa, gk = saved_keys(u)
+    mode = u.get("key_mode", "own")
     return {
         "id": u["id"], "email": u["email"],
         "free_used": u.get("free_used", 0), "free_limit": FREE_LIMIT,
         "is_subscribed": bool(u.get("is_subscribed")),
         "is_admin": is_admin_user(u),
-        "has_own_key": bool(oa or gk),
+        "key_mode": mode,
+        "has_own_key": bool((oa or gk)) and mode == "own",
         "openai_key_set": bool(u.get("openai_key_enc")),
         "google_key_set": bool(u.get("google_key_enc")),
         "openai_key_masked": _mask_key(oa),
@@ -441,6 +451,24 @@ def now_iso() -> str:
 
 def classify_error(exc) -> tuple:
     """Map raw pipeline exceptions to (error_code, friendly_message)."""
+    # A failure that happened while using the USER'S OWN key — attribute it to that key,
+    # never to the shared Universal key.
+    if isinstance(exc, pipeline.OwnKeyError):
+        provider = "OpenAI" if exc.provider == "openai" else "Google / Gemini"
+        where = "platform.openai.com" if exc.provider == "openai" else "aistudio.google.com"
+        msg = str(exc.original) or ""
+        if re.search(r"invalid[_ ]?api[_ ]?key|incorrect api key|api key not valid|authentication|unauthorized|permission denied|\b401\b|\b403\b", msg, re.I):
+            return "key", (
+                f"Your {provider} key was rejected. Re-check it in Settings → AI keys, "
+                f"or switch AI engine to “Built-in credits” to use the app's shared credits instead."
+            )
+        if re.search(r"budget|exceeded|insufficient|quota|credit|billing|rate limit|\b429\b", msg, re.I):
+            return "key", (
+                f"Your {provider} account is out of credits or hit its rate limit "
+                f"(this is YOUR key, not the app's Universal credits). Add billing/credits at "
+                f"{where}, or switch AI engine to “Built-in credits” in Settings → AI keys."
+            )
+        return "generic", (f"{provider} error: {msg[:220]}" or "Your key errored.")
     msg = str(exc) or ""
     if re.search(r"invalid[_ ]?api[_ ]?key|incorrect api key|api key not valid|authentication|unauthorized|permission denied|\b401\b|\b403\b", msg, re.I):
         return "key", (
@@ -543,6 +571,7 @@ class SettingsUpdate(BaseModel):
     openai_key: Optional[str] = None   # None = unchanged; "" = clear
     google_key: Optional[str] = None
     brand_handle: Optional[str] = None
+    key_mode: Optional[str] = None     # "own" | "builtin"
 
 
 class TestKeysRequest(BaseModel):
@@ -1601,6 +1630,8 @@ async def update_settings(req: SettingsUpdate, user=Depends(current_user)):
         upd["google_key_enc"] = enc_key(req.google_key.strip(), user["id"], "google") if req.google_key.strip() else None
     if req.brand_handle is not None:
         upd["brand_handle"] = req.brand_handle.strip()[:40]
+    if req.key_mode is not None:
+        upd["key_mode"] = "builtin" if req.key_mode == "builtin" else "own"
     if upd:
         await db.users.update_one({"id": user["id"]}, {"$set": upd})
     fresh = await db.users.find_one({"id": user["id"]})

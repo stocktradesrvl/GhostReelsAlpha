@@ -60,6 +60,16 @@ class _UserKeys:
 USER_KEYS = _UserKeys()
 
 
+class OwnKeyError(Exception):
+    """Raised when a call made with the USER'S OWN BYOK key fails, so the error can be
+    attributed to their key (OpenAI vs Google) instead of the shared Universal key."""
+
+    def __init__(self, provider: str, original: Exception):
+        self.provider = provider  # "openai" | "google"
+        self.original = original
+        super().__init__(str(original))
+
+
 def set_user_keys(openai_key: str = "", google_key: str = "") -> None:
     _USER_OPENAI.set((openai_key or "").strip())
     _USER_GOOGLE.set((google_key or "").strip())
@@ -82,13 +92,16 @@ def validate_google_key(key: str) -> bool:
 async def _chat_text(session_id: str, system: str, prompt: str) -> str:
     """Text generation via the user's own OpenAI key when set, else the Emergent key."""
     if USER_KEYS["openai"]:
-        client = openai.AsyncOpenAI(api_key=USER_KEYS["openai"])
-        resp = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "system", "content": system},
-                      {"role": "user", "content": prompt}],
-        )
-        return resp.choices[0].message.content or ""
+        try:
+            client = openai.AsyncOpenAI(api_key=USER_KEYS["openai"])
+            resp = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "system", "content": system},
+                          {"role": "user", "content": prompt}],
+            )
+            return resp.choices[0].message.content or ""
+        except Exception as e:  # noqa: BLE001
+            raise OwnKeyError("openai", e)
     chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=session_id,
                    system_message=system).with_model("openai", "gpt-5.4")
     return await chat.send_message(UserMessage(text=prompt))
@@ -99,10 +112,13 @@ async def _tts_bytes(text: str, voice_openai: str, speed: float) -> bytes:
     text = re.sub(r"\s+", " ", text).strip()[:4000]
     spd = max(0.5, min(1.5, float(speed)))
     if USER_KEYS["openai"]:
-        client = openai.AsyncOpenAI(api_key=USER_KEYS["openai"])
-        resp = await client.audio.speech.create(
-            model="tts-1", voice=voice_openai, input=text, response_format="mp3", speed=spd)
-        return resp.content
+        try:
+            client = openai.AsyncOpenAI(api_key=USER_KEYS["openai"])
+            resp = await client.audio.speech.create(
+                model="tts-1", voice=voice_openai, input=text, response_format="mp3", speed=spd)
+            return resp.content
+        except Exception as e:  # noqa: BLE001
+            raise OwnKeyError("openai", e)
     tts = OpenAITextToSpeech(api_key=EMERGENT_LLM_KEY)
     return await tts.generate_speech(text=text, model="tts-1-hd", voice=voice_openai,
                                      speed=spd, response_format="mp3")
@@ -372,13 +388,16 @@ async def transcribe_words(audio_path: str):
             words.append({"word": tok, "start": start, "end": max(start + 0.05, end)})
         return words, duration
     if USER_KEYS["openai"]:
-        client = openai.AsyncOpenAI(api_key=USER_KEYS["openai"])
-        with open(audio_path, "rb") as fh:
-            result = await client.audio.transcriptions.create(
-                model="whisper-1", file=fh,
-                response_format="verbose_json", timestamp_granularities=["word"],
-            )
-        return _parse_words(result)
+        try:
+            client = openai.AsyncOpenAI(api_key=USER_KEYS["openai"])
+            with open(audio_path, "rb") as fh:
+                result = await client.audio.transcriptions.create(
+                    model="whisper-1", file=fh,
+                    response_format="verbose_json", timestamp_granularities=["word"],
+                )
+            return _parse_words(result)
+        except Exception as e:  # noqa: BLE001
+            raise OwnKeyError("openai", e)
     stt = OpenAISpeechToText(api_key=EMERGENT_LLM_KEY)
     with open(audio_path, "rb") as fh:
         result = await stt.transcribe(
@@ -756,24 +775,29 @@ async def generate_images(prompts: list, workdir: str, style_suffix: str = "",
                       f"(same face, hair, outfit): {character_bible}.")
         out = os.path.join(workdir, f"scene_{i}.png")
         if USER_KEYS["google"]:
-            client = google_genai.Client(api_key=USER_KEYS["google"])
-            resp = await client.aio.models.generate_content(
-                model="gemini-2.5-flash-image",
-                contents=prompt + style,
-                config=genai_types.GenerateContentConfig(
-                    response_modalities=["TEXT", "IMAGE"],
-                    image_config={"aspect_ratio": "9:16"},
-                ),
-            )
-            img_bytes = None
-            for part in resp.candidates[0].content.parts:
-                if getattr(part, "inline_data", None) and part.inline_data.data:
-                    img_bytes = part.inline_data.data
-                    break
-            if not img_bytes:
-                raise RuntimeError("Image generation returned no image")
-            with open(out, "wb") as f:
-                f.write(img_bytes)
+            try:
+                client = google_genai.Client(api_key=USER_KEYS["google"])
+                resp = await client.aio.models.generate_content(
+                    model="gemini-2.5-flash-image",
+                    contents=prompt + style,
+                    config=genai_types.GenerateContentConfig(
+                        response_modalities=["TEXT", "IMAGE"],
+                        image_config={"aspect_ratio": "9:16"},
+                    ),
+                )
+                img_bytes = None
+                for part in resp.candidates[0].content.parts:
+                    if getattr(part, "inline_data", None) and part.inline_data.data:
+                        img_bytes = part.inline_data.data
+                        break
+                if not img_bytes:
+                    raise RuntimeError("Image generation returned no image")
+                with open(out, "wb") as f:
+                    f.write(img_bytes)
+            except OwnKeyError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                raise OwnKeyError("google", e)
         else:
             chat = LlmChat(
                 api_key=EMERGENT_LLM_KEY,

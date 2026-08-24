@@ -215,3 +215,25 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
     Also fixed a cold-navigate race that briefly flashed "Couldn't load this series" (silent 1× retry).
   - Verified: testing agent iteration 11 — backend 10/10 (real REELS_MOCK=0) + both frontend flows PASS,
     reviewed scripts persist verbatim to reel docs.
+
+## Follow-up (2026-06 · batch 15 · forked) — BYOK error attribution + AI-engine toggle — DONE
+- **User bug (production, admin, AI-Image reels):** "out of Universal Key credits" error even though
+  Universal has ~100 credits and BYOK keys are saved. Root cause: when the user's OWN OpenAI/Gemini
+  key errors (typically their own account has no billing/credits, or a 429), `classify_error` lumped
+  it into the generic "top up your Universal Key" message — misattributing THEIR key's failure to the
+  shared pool.
+- **Fix 1 — accurate attribution:** `pipeline.OwnKeyError(provider, original)` now wraps every own-key
+  call (`_chat_text`, `_tts_bytes`, whisper transcribe, Gemini `generate_images`). `classify_error`
+  detects it and returns `error_code='key'` with a message naming the exact key ("Your OpenAI key was
+  rejected…" / "Your Google/Gemini account is out of credits… add billing at platform.openai.com /
+  aistudio.google.com, or switch AI engine to Built-in credits").
+- **Fix 2 — AI-engine toggle (user-requested):** `users.key_mode` ('own'|'builtin', default 'own').
+  `saved_keys()` always decrypts (for masking/display); `user_keys()` returns ('','') in 'builtin' mode
+  so generation uses the Universal key even when BYOK keys are saved. `PUT /api/settings` accepts
+  `key_mode`; `public_user` exposes `key_mode` + effective `has_own_key`. Frontend Settings → AI KEYS:
+  segmented control (`key-mode-own` / `key-mode-builtin`) + context note that AI-Image reels need BOTH
+  keys. Also fixed a Settings auth-hydration race (gated the load useEffect on `user`).
+- Verified: testing agent iteration 12 — backend 5/5 (persist, ignore-in-builtin, own-key 402 attribution,
+  builtin reroutes to Universal 200) + frontend toggle UX. **User must redeploy for prod.** Immediate
+  workaround for the user: switch AI engine to "Built-in credits" (uses the 100 Universal credits) OR add
+  billing/credits to their OpenAI + Gemini accounts.

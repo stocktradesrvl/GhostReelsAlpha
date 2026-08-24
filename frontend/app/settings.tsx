@@ -79,11 +79,12 @@ export default function SettingsScreen() {
   const outroSheet = useRef<BottomSheetModal>(null);
 
   useEffect(() => {
+    if (!user) return; // wait for auth token hydration before hitting authed endpoints
     api.getConfig().then(setConfig).catch(() => {});
     api.getSettings().then((s) => { setSettings(s); setBrandHandle(s.brand_handle || ""); }).catch(() => {});
     loadDefaults().then((d) => setDefaults(d)).catch(() => {});
     loadPresets().then(setPresets).catch(() => {});
-  }, []);
+  }, [user]);
 
   const flash = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(null), 2200); }, []);
 
@@ -143,6 +144,23 @@ export default function SettingsScreen() {
       },
     ]);
   }, [flash, refreshAuth]);
+
+  const setKeyMode = useCallback(async (mode: "own" | "builtin") => {
+    if (settings?.key_mode === mode) return;
+    haptic.select();
+    // optimistic
+    setSettings((prev) => (prev ? { ...prev, key_mode: mode } : prev));
+    try {
+      const s = await api.updateSettings({ key_mode: mode });
+      setSettings(s);
+      await refreshAuth();
+      flash(mode === "own" ? "Using your own keys ✓" : "Using built-in credits ✓");
+    } catch (e: any) {
+      haptic.error();
+      flash(e.message || "Couldn't switch AI engine");
+      api.getSettings().then(setSettings).catch(() => {});
+    }
+  }, [settings?.key_mode, flash, refreshAuth]);
 
   const persistDefaults = useCallback(async (next: StudioDefaults) => {
     setDefaults(next);
@@ -204,7 +222,40 @@ export default function SettingsScreen() {
         {/* ---- AI KEYS ---- */}
         <Section label="AI KEYS · BRING YOUR OWN" hint="Use your own API keys to skip the shared credit limit. Leave blank to keep using built-in credits." />
 
-        <View style={styles.keyRow}>
+        <Text style={styles.keyLabel}>AI engine</Text>
+        <Text style={styles.keyHint}>Choose which credits power your reels. Switch to “Built-in” anytime if your own key errors.</Text>
+        <View style={styles.segRow}>
+          <Pressable
+            testID="key-mode-own"
+            onPress={() => setKeyMode("own")}
+            style={[styles.seg, (settings?.key_mode ?? "own") === "own" && styles.segActive]}
+          >
+            <Ionicons name="key" size={15} color={(settings?.key_mode ?? "own") === "own" ? colors.onBrandTertiary : colors.onSurfaceSecondary} />
+            <Text style={[styles.segTxt, (settings?.key_mode ?? "own") === "own" && styles.segTxtActive]}>My own keys</Text>
+          </Pressable>
+          <Pressable
+            testID="key-mode-builtin"
+            onPress={() => setKeyMode("builtin")}
+            style={[styles.seg, settings?.key_mode === "builtin" && styles.segActive]}
+          >
+            <Ionicons name="sparkles" size={15} color={settings?.key_mode === "builtin" ? colors.onBrandTertiary : colors.onSurfaceSecondary} />
+            <Text style={[styles.segTxt, settings?.key_mode === "builtin" && styles.segTxtActive]}>Built-in credits</Text>
+          </Pressable>
+        </View>
+        {settings?.key_mode === "builtin" && (
+          <View style={styles.noteBox}>
+            <Ionicons name="information-circle" size={15} color={colors.brand} />
+            <Text style={styles.noteTxt}>Using the app's built-in (Universal) credits. Your saved keys are kept but ignored until you switch back.</Text>
+          </View>
+        )}
+        {(settings?.key_mode ?? "own") === "own" && (
+          <View style={styles.noteBox}>
+            <Ionicons name="information-circle" size={15} color={colors.brand} />
+            <Text style={styles.noteTxt}>AI Image reels need BOTH keys: OpenAI (script &amp; voice) and Google/Gemini (images). Any key left blank falls back to built-in credits for that step.</Text>
+          </View>
+        )}
+
+        <View style={[styles.keyRow, { marginTop: spacing.lg }]}>
           <Text style={styles.keyLabel}>OpenAI key</Text>
           <View style={[styles.statusPill, settings?.openai_key_set ? styles.pillOn : styles.pillOff]}>
             <Text style={[styles.pillTxt, settings?.openai_key_set ? styles.pillTxtOn : styles.pillTxtOff]}>
@@ -458,6 +509,13 @@ const styles = StyleSheet.create({
   keyRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.md },
   keyLabel: { fontFamily: font.bodyBold, fontSize: 15, color: colors.onSurface },
   keyHint: { fontFamily: font.body, fontSize: 12, color: colors.onSurfaceSecondary, marginTop: 2 },
+  segRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },
+  seg: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.xs, height: 46, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
+  segActive: { borderColor: colors.brand, backgroundColor: colors.brandTertiary },
+  segTxt: { fontFamily: font.bodySemi, fontSize: 13, color: colors.onSurfaceSecondary },
+  segTxtActive: { color: colors.onBrandTertiary },
+  noteBox: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm, padding: spacing.sm, borderRadius: radius.md, backgroundColor: colors.brandTertiary, borderWidth: 1, borderColor: colors.brandPrimary },
+  noteTxt: { flex: 1, fontFamily: font.body, fontSize: 12, color: colors.brandSecondary, lineHeight: 17 },
   statusPill: { paddingHorizontal: spacing.sm, height: 24, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", maxWidth: "58%" },
   pillOn: { backgroundColor: "rgba(34,197,94,0.14)" },
   pillOff: { backgroundColor: colors.surfaceTertiary },

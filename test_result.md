@@ -182,3 +182,41 @@
 ##       POST /api/series/{id}/episode with script (persists reviewed script, series_id set, scripting skipped).
 ##       Frontend to verify: Series detail -> Write episode script -> edit -> Generate episode; Batch -> Write
 ##       scripts -> edit each -> Generate reels; editing topics clears drafts. Single-reel flow unchanged.
+
+## ---- Session 2: BYOK error attribution + AI-engine toggle ----
+## backend:
+##   - task: "Accurate BYOK error attribution (OwnKeyError)"
+##     implemented: true
+##     working: true
+##     file: "/app/backend/pipeline.py, /app/backend/server.py (classify_error)"
+##     needs_retesting: true
+##     status_history:
+##       - agent: "main"
+##         comment: "pipeline wraps own-key OpenAI/Google failures in OwnKeyError(provider). classify_error now returns a message naming the user's OWN key (OpenAI vs Google) for auth/quota errors instead of the misleading 'top up Universal Key'. Direct test: bad own OpenAI key -> 402 'Your OpenAI key was rejected... or switch to Built-in credits'."
+##   - task: "AI engine toggle (key_mode own|builtin)"
+##     implemented: true
+##     working: true
+##     file: "/app/backend/server.py (user_keys/saved_keys/public_user/update_settings)"
+##     needs_retesting: true
+##     status_history:
+##       - agent: "main"
+##         comment: "users.key_mode default 'own'. user_keys() returns ('','') when 'builtin' so pipeline uses Universal key; saved_keys() always decrypts for masking. PUT /settings accepts key_mode. Direct test: builtin mode -> /script generated a real script via Universal key (keys ignored)."
+## frontend:
+##   - task: "AI engine toggle UI in Settings"
+##     implemented: true
+##     working: "NA"
+##     file: "/app/frontend/app/settings.tsx"
+##     needs_retesting: true
+##     status_history:
+##       - agent: "main"
+##         comment: "Segmented control (key-mode-own / key-mode-builtin) at top of AI KEYS. Persists via updateSettings + refreshAuth, optimistic. Note box explains AI-image reels need BOTH keys. Renders correctly (screenshot, admin login)."
+## agent_communication:
+##   - agent: "main"
+##     message: >
+##       Session 2 test focus: (1) POST /settings with key_mode 'own'/'builtin' persists and GET /settings
+##       reflects it; in 'builtin' mode a saved key is IGNORED for generation (user_keys empty) but still
+##       shown as set/masked. (2) A generation failure using the user's OWN key returns error_code 'key'
+##       with a message naming OpenAI or Google (NOT the Universal-key wording). Use a throwaway account with
+##       a bogus key 'sk-invalidkey-0000' and POST /script -> expect 402 + 'Your OpenAI key was rejected'.
+##       (3) Frontend Settings: tap key-mode-builtin then key-mode-own; toggle persists across reload;
+##       note box visible. Admin creds russngina@gmail.com / 1123581321$$. REELS_MOCK=0.
