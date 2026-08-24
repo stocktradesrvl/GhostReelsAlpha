@@ -101,3 +101,84 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+## user_problem_statement: >
+  Faceless AI Reels app (GhostReelsAlpha). Two items this session:
+  (1) P0 bug — AI-image reel generation hangs at 82% on production. Root cause: FFmpeg
+  Ken Burns zoompan supersampled to scale=1620:2880 which peaked at ~3GB RAM and got
+  OOM-killed on the memory-limited prod pod. Fixed by reducing to scale=1350:2400
+  (peak RAM now ~188MB, render ~14s). Confirmed via standalone repro (backend/tests/test_render_82.py).
+  (2) P1 feature — extend the "AI script review/edit before spending credits" step
+  (already in the single-reel flow) to the Series and Batch generation flows.
+
+## backend:
+##   - task: "AI-image render OOM fix (82% hang)"
+##     implemented: true
+##     working: true
+##     file: "/app/backend/pipeline.py (render_video_images)"
+##     status_history:
+##       - agent: "main"
+##         comment: "scale=1620:2880 -> 1350:2400. Repro proves peak RAM 3039MB -> 188MB; render OK in ~14s even with 4096x6144 images. Self-tested."
+##   - task: "Series episode script preview + reviewed-script build"
+##     implemented: true
+##     working: true
+##     file: "/app/backend/server.py"
+##     needs_retesting: true
+##     status_history:
+##       - agent: "main"
+##         comment: "New POST /api/series/{id}/episode/script (drafts continuity script, no quota consume). EpisodeRequest gains optional script; create_series_episode stores it so pipeline skips scripting. Mock e2e verified: reviewed script persisted, series_id set."
+##   - task: "Batch script preview + reviewed-script build"
+##     implemented: true
+##     working: true
+##     file: "/app/backend/server.py"
+##     needs_retesting: true
+##     status_history:
+##       - agent: "main"
+##         comment: "New POST /api/reels/batch/scripts (drafts one script per topic in parallel, gated to BYOK/subscription/admin). BatchReelRequest gains optional scripts[]; create_reels_batch pairs script to topic. Mock e2e verified: edited script persisted per reel."
+
+## frontend:
+##   - task: "Series review step UI"
+##     implemented: true
+##     working: "NA"
+##     file: "/app/frontend/app/series/[id].tsx"
+##     needs_retesting: true
+##     status_history:
+##       - agent: "main"
+##         comment: "Added Write episode script (episode-write-script-button) -> editable episode-script-input -> Generate episode (disabled until script drafted)."
+##   - task: "Batch review step UI"
+##     implemented: true
+##     working: "NA"
+##     file: "/app/frontend/app/batch.tsx"
+##     needs_retesting: true
+##     status_history:
+##       - agent: "main"
+##         comment: "Two-step CTA: Write scripts (batch-write-scripts-button) -> per-topic editable batch-script-input-{i} -> Generate reels. Editing topics/length clears drafts."
+
+## metadata:
+##   created_by: "main_agent"
+##   version: "1.1"
+##   test_sequence: 1
+
+## test_plan:
+##   current_focus:
+##     - "Series episode script preview + reviewed-script build"
+##     - "Batch script preview + reviewed-script build"
+##     - "Series review step UI"
+##     - "Batch review step UI"
+##   stuck_tasks: []
+##   test_all: false
+##   test_priority: "high_first"
+
+## agent_communication:
+##   - agent: "main"
+##     message: >
+##       Please test the NEW AI-script-review flows end-to-end. Admin creds (unlimited, bypasses quota
+##       + gates batch): russngina@gmail.com / 1123581321$$ (see /app/memory/test_credentials.md).
+##       REELS_MOCK=0 (real generation) and the Universal Key budget was topped up by the user, so real
+##       generation should work; if it hits the budget cap you may set REELS_MOCK=1 in /app/backend/.env
+##       (restart backend) to test the flows credit-free, then set it back to 0.
+##       Backend to verify: POST /api/reels/batch/scripts (returns one script per topic; >12 or empty -> 400;
+##       non-BYOK/non-sub/non-admin -> 402), POST /api/reels/batch with scripts[] (reviewed script persists
+##       on each reel doc), POST /api/series/{id}/episode/script (returns continuity draft + episode_number),
+##       POST /api/series/{id}/episode with script (persists reviewed script, series_id set, scripting skipped).
+##       Frontend to verify: Series detail -> Write episode script -> edit -> Generate episode; Batch -> Write
+##       scripts -> edit each -> Generate reels; editing topics clears drafts. Single-reel flow unchanged.

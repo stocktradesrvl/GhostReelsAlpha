@@ -196,3 +196,22 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
 - **Reels/Series/Outros scoped by `user_id`** (create sets it; list/get/delete filter by owner).
 - Verified: testing agent iteration 10 — backend 10/10 (auth, quota 3→402, BYOK bypass, encryption-at-rest,
   masking, isolation), frontend 7/7 after fixing the Settings `refreshAuth()` staleness bug.
+
+## Follow-up (2026-06 · batch 14 · forked) — 82% render OOM fix + AI script review for Series/Batch — DONE
+- **P0: AI-image reel "stuck at 82%" fixed.** Root cause: `render_video_images` Ken Burns filter
+  supersampled to `scale=1620:2880` before `zoompan`, peaking at ~3 GB RAM → OOM-killed on the
+  memory-limited prod pod (hang at the "Rendering video" 82% stage). Reduced to `scale=1350:2400`
+  (still 1.25× headroom for the 1.18 max zoom). Verified via `backend/tests/test_render_82.py`:
+  peak RAM 3039 MB → 188 MB; render ~14 s even with 4096×6144 inputs. **User must redeploy for prod.**
+- **P1: AI script review/edit extended to Series + Batch** (previously single-reel only).
+  - Backend: `POST /api/series/{id}/episode/script` drafts the continuity script (no reel, no quota
+    consume); `EpisodeRequest.script` + `create_series_episode` persist a reviewed script so the
+    pipeline skips scripting. `POST /api/reels/batch/scripts` drafts one script per topic in parallel
+    (gated to BYOK/subscription/admin, ≤12); `BatchReelRequest.scripts[]` paired to topics in
+    `create_reels_batch`. `moderate_text` runs over reviewed scripts too.
+  - Frontend: Series detail — `episode-write-script-button` → editable `episode-script-input` →
+    `create-episode-button` (disabled until drafted). Batch — two-step CTA `batch-write-scripts-button`
+    → per-topic `batch-script-input-{i}` → `batch-generate-button`; editing topics/length clears drafts.
+    Also fixed a cold-navigate race that briefly flashed "Couldn't load this series" (silent 1× retry).
+  - Verified: testing agent iteration 11 — backend 10/10 (real REELS_MOCK=0) + both frontend flows PASS,
+    reviewed scripts persist verbatim to reel docs.

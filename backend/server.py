@@ -501,6 +501,8 @@ class CreateReelRequest(ReelSettings):
 class BatchReelRequest(ReelSettings):
     topics: List[str] = []
     scheduled_at: Optional[str] = None  # ISO time; if future, reels wait until then
+    # Optional reviewed scripts: [{topic, script}] paired 1:1 with `topics`.
+    scripts: Optional[List[dict]] = None
 
 
 class Character(BaseModel):
@@ -523,6 +525,7 @@ class SuggestRequest(BaseModel):
 
 class EpisodeRequest(BaseModel):
     topic: Optional[str] = None
+    script: Optional[str] = None   # reviewed/edited script; skips AI scripting when provided
 
 
 class SceneRegenRequest(BaseModel):
@@ -1072,9 +1075,20 @@ async def create_reels_batch(req: BatchReelRequest, user=Depends(current_user)):
 
     import asyncio
     created = []
+    # Pair any reviewed scripts to their topic (1:1 by topic text).
+    script_map = {}
+    if req.scripts:
+        for item in req.scripts:
+            t = (item.get("topic") or "").strip()
+            sc = (item.get("script") or "").strip()
+            if t and sc:
+                script_map[t] = sc
+    if script_map:
+        moderate_text(*script_map.values())
     for topic in topics:
         title = topic[:48].strip()
-        doc = build_reel_doc(req, "topic", topic, None, title, user_id=user["id"])
+        script = script_map.get(topic)
+        doc = build_reel_doc(req, "topic", topic, script, title, user_id=user["id"])
         if sched_iso:
             doc["status"] = "scheduled"
             doc["scheduled_at"] = sched_iso
@@ -1084,6 +1098,42 @@ async def create_reels_batch(req: BatchReelRequest, user=Depends(current_user)):
             asyncio.create_task(run_pipeline(doc["id"]))
         created.append(public_reel(doc))
     return {"created": created, "count": len(created), "scheduled": bool(sched_iso)}
+
+
+class BatchScriptsRequest(BaseModel):
+    topics: List[str] = []
+    seconds: int = 30
+
+
+@api_router.post("/reels/batch/scripts")
+async def batch_scripts(req: BatchScriptsRequest, user=Depends(current_user)):
+    """Generate a draft script per topic so the user can review/edit before building the batch."""
+    oa, gk = user_keys(user)
+    if not (oa or gk) and not user.get("is_subscribed") and not is_admin_user(user):
+        raise HTTPException(402, "Batch generation needs your own OpenAI/Google key or a subscription.")
+    topics = [t.strip() for t in (req.topics or []) if t.strip()]
+    if not topics:
+        raise HTTPException(400, "At least one topic is required")
+    if len(topics) > 12:
+        raise HTTPException(400, "Up to 12 topics per batch")
+    moderate_text(*topics)
+    pipeline.set_user_keys(oa, gk)
+    try:
+        import asyncio
+        results = await asyncio.gather(
+            *[pipeline.generate_script(t, req.seconds) for t in topics],
+            return_exceptions=True,
+        )
+    finally:
+        pipeline.set_user_keys("", "")
+    scripts = []
+    for t, r in zip(topics, results):
+        if isinstance(r, Exception):
+            code, friendly = classify_error(r)
+            raise HTTPException(402 if code in ("budget", "key") else 500, friendly)
+        scripts.append({"topic": t, "script": r, "word_count": len(r.split())})
+    return {"scripts": scripts}
+
 
 
 @api_router.post("/reels/{reel_id}/view")
@@ -1215,8 +1265,9 @@ async def delete_series(series_id: str, user=Depends(current_user)):
     return {"ok": True}
 
 
-@api_router.post("/series/{series_id}/episode")
-async def create_series_episode(series_id: str, req: EpisodeRequest, user=Depends(current_user)):
+@api_router.post("/series/{series_id}/episode/script")
+async def series_episode_script(series_id: str, req: EpisodeRequest, user=Depends(current_user)):
+    """Draft the next episode's script (with continuity) so the user can review/edit before building."""
     series = await db.series.find_one({"id": series_id, "user_id": user["id"]})
     if not series:
         raise HTTPException(404, "Series not found")
@@ -1225,9 +1276,37 @@ async def create_series_episode(series_id: str, req: EpisodeRequest, user=Depend
     s = ReelSettings(**(series.get("settings") or {}))
     ep = int(series.get("episode_count", 0)) + 1
     topic = (req.topic or "").strip() or None
+    prior = await db.reels.find({
+        "series_id": series_id, "status": "ready",
+        "episode_number": {"$lt": ep},
+    }).sort("episode_number", 1).to_list(20)
+    prior_scripts = [p.get("script") for p in prior if p.get("script")]
+    oa, gk = user_keys(user)
+    pipeline.set_user_keys(oa, gk)
+    try:
+        script = await pipeline.generate_series_script(series, prior_scripts, topic, s.seconds)
+    except Exception as e:  # noqa: BLE001
+        code, friendly = classify_error(e)
+        raise HTTPException(402 if code in ("budget", "key") else 500, friendly)
+    finally:
+        pipeline.set_user_keys("", "")
+    return {"script": script, "word_count": len(script.split()), "episode_number": ep}
+
+
+@api_router.post("/series/{series_id}/episode")
+async def create_series_episode(series_id: str, req: EpisodeRequest, user=Depends(current_user)):
+    series = await db.series.find_one({"id": series_id, "user_id": user["id"]})
+    if not series:
+        raise HTTPException(404, "Series not found")
+    moderate_text(req.topic, req.script)
+    await enforce_quota(user)
+    s = ReelSettings(**(series.get("settings") or {}))
+    ep = int(series.get("episode_count", 0)) + 1
+    topic = (req.topic or "").strip() or None
+    script = (req.script or "").strip() or None
     title = f"{series['title']} — Ep {ep}"
     display_topic = topic or (series.get("premise") or series["title"])[:60]
-    doc = build_reel_doc(s, "topic", display_topic, None, title,
+    doc = build_reel_doc(s, "topic", display_topic, script, title,
                          series_id=series_id, episode_number=ep, user_id=user["id"])
     # keep the raw user topic (None -> AI continues the story on its own)
     doc["topic"] = topic

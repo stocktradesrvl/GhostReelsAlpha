@@ -151,6 +151,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  batchScripts: (topics: string[], seconds: number) =>
+    req<{ scripts: { topic: string; script: string; word_count: number }[] }>(
+      "/reels/batch/scripts",
+      { method: "POST", body: JSON.stringify({ topics, seconds }) },
+    ),
   listReels: () => req<Reel[]>("/reels"),
   getReel: (id: string) => req<Reel>(`/reels/${id}`),
   deleteReel: (id: string) => req<{ ok: boolean }>(`/reels/${id}`, { method: "DELETE" }),
@@ -165,10 +170,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ premise, tone }),
     }),
-  createEpisode: (id: string, topic?: string) =>
+  episodeScript: (id: string, topic?: string) =>
+    req<{ script: string; word_count: number; episode_number: number }>(
+      `/series/${id}/episode/script`,
+      { method: "POST", body: JSON.stringify({ topic: topic || null }) },
+    ),
+  createEpisode: (id: string, topic?: string, script?: string) =>
     req<Reel>(`/series/${id}/episode`, {
       method: "POST",
-      body: JSON.stringify({ topic: topic || null }),
+      body: JSON.stringify({ topic: topic || null, script: script || null }),
     }),
   deleteSeries: (id: string) => req<{ ok: boolean }>(`/series/${id}`, { method: "DELETE" }),
   getScenes: (id: string) =>

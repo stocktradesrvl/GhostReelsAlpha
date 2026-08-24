@@ -804,7 +804,7 @@ async def render_video_images(audio_path: str, ass_name: str, image_paths: list,
     for i in range(n):
         # Ken Burns: cover-crop, fix fps so the clip is finite, slow continuous zoom.
         vlabels += (
-            f"[{i}:v]scale=1620:2880:force_original_aspect_ratio=increase,crop=1620:2880,"
+            f"[{i}:v]scale=1350:2400:force_original_aspect_ratio=increase,crop=1350:2400,"
             f"fps={fps},zoompan=z='min(1.0+0.0012*on,1.18)':d=1:x='iw/2-(iw/zoom/2)':"
             f"y='ih/2-(ih/zoom/2)':s=1080x1920,setsar=1[v{i}];"
         )

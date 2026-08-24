@@ -27,6 +27,8 @@ export default function BatchScreen() {
   const [musicId, setMusicId] = useState("none");
   const [hookEnabled, setHookEnabled] = useState(true);
   const [whenMode, setWhenMode] = useState<"now" | "tonight">("now");
+  const [drafts, setDrafts] = useState<{ topic: string; script: string }[]>([]);
+  const [drafting, setDrafting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,6 +48,30 @@ export default function BatchScreen() {
     () => topicsText.split("\n").map((t) => t.trim()).filter(Boolean),
     [topicsText],
   );
+
+  // Editing topics or length invalidates any drafted scripts.
+  useEffect(() => { setDrafts([]); }, [topicsText, seconds]);
+
+  const writeScripts = useCallback(async () => {
+    if (topics.length === 0) { setError("Add at least one topic."); return; }
+    if (topics.length > 12) { setError("Up to 12 topics per batch."); return; }
+    setError(null);
+    setDrafting(true);
+    try {
+      const res = await api.batchScripts(topics, seconds);
+      setDrafts(res.scripts.map((s) => ({ topic: s.topic, script: s.script })));
+      haptic.medium();
+    } catch (e: any) {
+      setError(e.message || "Couldn't draft the scripts.");
+      haptic.error();
+    } finally {
+      setDrafting(false);
+    }
+  }, [topics, seconds]);
+
+  const editDraft = useCallback((i: number, text: string) => {
+    setDrafts((prev) => prev.map((d, idx) => (idx === i ? { ...d, script: text } : d)));
+  }, []);
 
   const voice = config?.voices.find((v) => v.id === voiceId);
   const bg = config?.bg_themes.find((b) => b.id === bgTheme);
@@ -72,6 +98,7 @@ export default function BatchScreen() {
         topics, seconds, voice_id: voiceId, caption_font: captionFont,
         caption_anim: "pop", bg_theme: bgTheme, bg_motion: "dynamic",
         music_id: musicId, hook_enabled: hookEnabled, scheduled_at,
+        scripts: drafts.length ? drafts : undefined,
       });
       haptic.heavy();
       router.replace("/(tabs)/library");
@@ -82,7 +109,7 @@ export default function BatchScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [topics, seconds, voiceId, captionFont, bgTheme, musicId, hookEnabled, whenMode, router]);
+  }, [topics, seconds, voiceId, captionFont, bgTheme, musicId, hookEnabled, whenMode, drafts, router]);
 
   return (
     <View style={styles.root}>
@@ -167,6 +194,28 @@ export default function BatchScreen() {
           })}
         </View>
 
+        {drafts.length > 0 && (
+          <>
+            <View style={styles.scriptHead}>
+              <Text style={styles.section}>REVIEW SCRIPTS</Text>
+              <Text style={styles.count}>{drafts.length} draft{drafts.length === 1 ? "" : "s"}</Text>
+            </View>
+            <Text style={styles.lead}>Edit any script below before building. Blank scripts fall back to AI.</Text>
+            {drafts.map((d, i) => (
+              <View key={i} style={styles.draftCard}>
+                <Text style={styles.draftTopic} numberOfLines={1}>{i + 1}. {d.topic}</Text>
+                <TextInput
+                  testID={`batch-script-input-${i}`}
+                  value={d.script}
+                  onChangeText={(t) => editDraft(i, t)}
+                  multiline
+                  style={[styles.input, { minHeight: 110, marginTop: spacing.sm }]}
+                />
+              </View>
+            ))}
+          </>
+        )}
+
         {!!error && (
           <View style={styles.errorBox} testID="batch-error">
             <Ionicons name="warning" size={16} color={colors.error} />
@@ -177,14 +226,25 @@ export default function BatchScreen() {
 
       <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
         <View style={[styles.ctaWrap, { paddingBottom: insets.bottom + spacing.sm }]}>
-          <PrimaryButton
-            testID="batch-generate-button"
-            label={whenMode === "tonight" ? `Schedule ${topics.length || 0} reel${topics.length === 1 ? "" : "s"}` : (topics.length > 1 ? `Generate ${topics.length} reels` : "Generate reel")}
-            icon="layers"
-            disabled={topics.length === 0}
-            loading={submitting}
-            onPress={generate}
-          />
+          {drafts.length === 0 ? (
+            <PrimaryButton
+              testID="batch-write-scripts-button"
+              label={topics.length > 1 ? `Write ${topics.length} scripts` : "Write script"}
+              icon="sparkles"
+              disabled={topics.length === 0}
+              loading={drafting}
+              onPress={writeScripts}
+            />
+          ) : (
+            <PrimaryButton
+              testID="batch-generate-button"
+              label={whenMode === "tonight" ? `Schedule ${topics.length || 0} reel${topics.length === 1 ? "" : "s"}` : (topics.length > 1 ? `Generate ${topics.length} reels` : "Generate reel")}
+              icon="layers"
+              disabled={topics.length === 0}
+              loading={submitting}
+              onPress={generate}
+            />
+          )}
         </View>
       </KeyboardStickyView>
 
@@ -220,6 +280,8 @@ const styles = StyleSheet.create({
   scriptHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   count: { fontFamily: font.bodyMed, fontSize: 11, color: colors.onSurfaceSecondary, marginTop: spacing.lg },
   input: { backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md, fontFamily: font.body, fontSize: 15, color: colors.onSurface, textAlignVertical: "top" },
+  draftCard: { marginTop: spacing.md, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: spacing.md },
+  draftTopic: { fontFamily: font.bodyBold, fontSize: 13, color: colors.brand },
   chipRow: { flexDirection: "row", gap: spacing.sm },
   chip: { flex: 1, height: 44, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
   chipActive: { borderColor: colors.brand, backgroundColor: colors.brandTertiary },

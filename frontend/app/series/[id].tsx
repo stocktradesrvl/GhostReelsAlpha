@@ -25,16 +25,24 @@ export default function SeriesDetail() {
   const [series, setSeries] = useState<Series | null>(null);
   const [episodes, setEpisodes] = useState<Reel[]>([]);
   const [topic, setTopic] = useState("");
+  const [script, setScript] = useState("");
+  const [drafting, setDrafting] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (retry = true) => {
     if (!id) return;
     try {
       const data = await api.getSeries(id);
       setSeries(data.series);
       setEpisodes(data.episodes);
+      setError(null);
     } catch {
+      // Cold-navigate can race with auth hydration → retry once silently before surfacing.
+      if (retry) {
+        setTimeout(() => load(false), 700);
+        return;
+      }
       setError("Couldn't load this series.");
     }
   }, [id]);
@@ -46,13 +54,30 @@ export default function SeriesDetail() {
     return () => { if (t) clearInterval(t); };
   }, [load, episodes.length, episodes.map((e) => e.status).join(",")]));
 
-  const createEpisode = useCallback(async () => {
+  const writeScript = useCallback(async () => {
     if (!id) return;
+    setError(null);
+    setDrafting(true);
+    try {
+      const res = await api.episodeScript(id, topic.trim() || undefined);
+      setScript(res.script);
+      haptic.medium();
+    } catch (e: any) {
+      setError(e.message || "Couldn't draft the episode script.");
+      haptic.error();
+    } finally {
+      setDrafting(false);
+    }
+  }, [id, topic]);
+
+  const createEpisode = useCallback(async () => {
+    if (!id || !script.trim()) return;
     setError(null);
     setCreating(true);
     try {
-      const reel = await api.createEpisode(id, topic.trim() || undefined);
+      const reel = await api.createEpisode(id, topic.trim() || undefined, script.trim());
       setTopic("");
+      setScript("");
       haptic.heavy();
       router.push(`/reel/${reel.id}`);
     } catch (e: any) {
@@ -61,7 +86,7 @@ export default function SeriesDetail() {
     } finally {
       setCreating(false);
     }
-  }, [id, topic, router]);
+  }, [id, topic, script, router]);
 
   const confirmDelete = useCallback(() => {
     Alert.alert("Delete series?", "This removes the series. Existing reels stay in your library.", [
@@ -123,7 +148,8 @@ export default function SeriesDetail() {
         <View style={styles.nextCard}>
           <Text style={styles.nextLabel}>CREATE EPISODE {nextEp}</Text>
           <Text style={styles.nextHint}>
-            Leave blank to let AI continue the storyline, or give this episode a beat.
+            Leave blank to let AI continue the storyline, or give this episode a beat. Draft the
+            script, review &amp; edit it, then build.
           </Text>
           <TextInput
             testID="episode-topic-input"
@@ -134,14 +160,46 @@ export default function SeriesDetail() {
             multiline
             style={styles.input}
           />
+          <Pressable
+            testID="episode-write-script-button"
+            onPress={() => { haptic.select(); writeScript(); }}
+            disabled={drafting}
+            style={({ pressed }) => [styles.draftBtn, pressed && { opacity: 0.85 }, drafting && { opacity: 0.6 }]}
+          >
+            <Ionicons name={drafting ? "hourglass-outline" : "sparkles"} size={16} color={colors.brand} />
+            <Text style={styles.draftBtnTxt}>
+              {drafting ? "Writing…" : script ? `Rewrite episode ${nextEp} script` : `Write episode ${nextEp} script`}
+            </Text>
+          </Pressable>
+
+          {!!script && (
+            <>
+              <View style={styles.scriptHead}>
+                <Text style={styles.scriptLabel}>EPISODE SCRIPT · REVIEW &amp; EDIT</Text>
+                <Text style={styles.wordCount}>{script.trim().split(/\s+/).filter(Boolean).length} words</Text>
+              </View>
+              <TextInput
+                testID="episode-script-input"
+                value={script}
+                onChangeText={setScript}
+                multiline
+                style={[styles.input, { minHeight: 130, marginTop: spacing.xs }]}
+              />
+            </>
+          )}
+
           <PrimaryButton
             testID="create-episode-button"
             label={`Generate episode ${nextEp}`}
             icon="add-circle-outline"
             loading={creating}
+            disabled={!script.trim()}
             onPress={createEpisode}
             style={{ marginTop: spacing.md }}
           />
+          {!script.trim() && (
+            <Text style={styles.buildHint}>Write &amp; review the script first, then build the episode.</Text>
+          )}
           {!!error && (
             <View style={styles.errorBox}>
               <Ionicons name="warning" size={16} color={colors.error} />
@@ -203,6 +261,12 @@ const styles = StyleSheet.create({
   nextLabel: { fontFamily: font.display, fontSize: 18, color: colors.onBrandTertiary, letterSpacing: 0.5 },
   nextHint: { fontFamily: font.body, fontSize: 12, color: colors.brandSecondary, marginTop: spacing.xs, marginBottom: spacing.md, lineHeight: 17 },
   input: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md, fontFamily: font.body, fontSize: 15, color: colors.onSurface, textAlignVertical: "top", minHeight: 60 },
+  draftBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, marginTop: spacing.md, height: 46, borderRadius: radius.md, borderWidth: 1, borderColor: colors.brand, backgroundColor: colors.surface },
+  draftBtnTxt: { fontFamily: font.bodyBold, fontSize: 14, color: colors.brand },
+  scriptHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.md },
+  scriptLabel: { fontFamily: font.bodyBold, fontSize: 10, letterSpacing: 1, color: colors.brandSecondary },
+  wordCount: { fontFamily: font.bodyMed, fontSize: 11, color: colors.brandSecondary },
+  buildHint: { fontFamily: font.body, fontSize: 12, color: colors.brandSecondary, textAlign: "center", marginTop: spacing.sm },
   errorBox: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.md, padding: spacing.md, borderRadius: radius.md, backgroundColor: "rgba(239,68,68,0.12)", borderWidth: 1, borderColor: "rgba(239,68,68,0.3)" },
   errorText: { flex: 1, fontFamily: font.bodyMed, fontSize: 13, color: colors.brandSecondary },
   emptyEp: { fontFamily: font.body, fontSize: 13, color: colors.onSurfaceSecondary, marginTop: spacing.sm },
