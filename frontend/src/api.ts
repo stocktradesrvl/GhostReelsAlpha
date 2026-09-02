@@ -4,7 +4,8 @@ export const PRIVACY_POLICY_URL = `${BASE}/legal/privacy`;
 export const TERMS_OF_SERVICE_URL = `${BASE}/legal/terms`;
 export const SUPPORT_EMAIL = "russngina@gmail.com";
 
-export type Voice = { id: string; name: string; tagline: string };
+export type Voice = { id: string; name: string; tagline: string; engine?: "openai" | "elevenlabs" };
+export type Aspect = { id: string; name: string; hint: string; width: number; height: number };
 export type VoiceSpeed = { id: string; name: string };
 export type ImageStyle = { id: string; name: string };
 export type CaptionStyle = { id: string; name: string; hint: string; hex: string };
@@ -27,6 +28,7 @@ export type Config = {
   bg_themes: BgTheme[];
   bg_motions: BgMotion[];
   music_tracks: MusicTrack[];
+  aspects?: Aspect[];
 };
 
 export type ReelStatus =
@@ -72,6 +74,7 @@ export type Reel = {
   duration: number | null;
   word_count: number | null;
   has_video: boolean;
+  exports?: Record<string, { status?: string; error?: string | null; width?: number; height?: number }>;
   created_at: string;
   updated_at: string;
 };
@@ -85,7 +88,13 @@ export type AppSettings = {
   openai_key_masked: string;
   google_key_set: boolean;
   google_key_masked: string;
+  elevenlabs_key_set?: boolean;
+  elevenlabs_key_masked?: string;
   brand_handle: string;
+  youtube_connected?: boolean;
+  youtube_channel?: string;
+  instagram_connected?: boolean;
+  instagram_username?: string;
 };
 export type Series = {
   id: string;
@@ -108,7 +117,25 @@ export type UserProfile = {
   key_mode?: "own" | "builtin";
   has_own_key: boolean; openai_key_set: boolean; google_key_set: boolean;
   openai_key_masked: string; google_key_masked: string; brand_handle: string;
+  elevenlabs_key_set?: boolean; elevenlabs_key_masked?: string;
+  youtube_connected?: boolean; youtube_channel?: string;
+  instagram_connected?: boolean; instagram_username?: string;
 };
+
+export function voiceSheetOption(v: Voice) {
+  const engine = v.engine === "elevenlabs" ? "ElevenLabs" : "OpenAI";
+  return { id: v.id, title: v.name, subtitle: v.tagline ? `${v.tagline} · ${engine}` : engine };
+}
+
+function mediaQs(extra?: Record<string, string | undefined>) {
+  const p = new URLSearchParams();
+  if (authToken) p.set("access_token", authToken);
+  if (extra) {
+    Object.entries(extra).forEach(([k, v]) => { if (v) p.set(k, v); });
+  }
+  const s = p.toString();
+  return s ? `?${s}` : "";
+}
 
 async function req<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
@@ -193,14 +220,24 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ prompt: prompt || null }),
     }),
-  sceneImageUrl: (id: string, index: number) => `${BASE}/reels/${id}/scene/${index}/image`,
+  sceneImageUrl: (id: string, index: number, extra?: { t?: string }) => `${BASE}/reels/${id}/scene/${index}/image${mediaQs({ t: extra?.t })}`,
   getSettings: () => req<AppSettings>("/settings"),
-  updateSettings: (payload: { openai_key?: string; google_key?: string; brand_handle?: string; key_mode?: "own" | "builtin" }) =>
+  updateSettings: (payload: { openai_key?: string; google_key?: string; elevenlabs_key?: string; brand_handle?: string; key_mode?: "own" | "builtin" }) =>
     req<AppSettings>("/settings", { method: "PUT", body: JSON.stringify(payload) }),
-  testKeys: (payload: { openai_key?: string; google_key?: string }) =>
-    req<{ openai?: { ok: boolean; message: string }; google?: { ok: boolean; message: string } }>(
+  testKeys: (payload: { openai_key?: string; google_key?: string; elevenlabs_key?: string }) =>
+    req<{ openai?: { ok: boolean; message: string }; google?: { ok: boolean; message: string }; elevenlabs?: { ok: boolean; message: string } }>(
       "/settings/test", { method: "POST", body: JSON.stringify(payload) },
     ),
+  exportAspect: (id: string, aspect: string) =>
+    req<Reel>(`/reels/${id}/export`, { method: "POST", body: JSON.stringify({ aspect }) }),
+  connectYoutube: () => req<{ configured: boolean; url: string | null; message?: string }>("/connect/youtube"),
+  connectInstagram: () => req<{ configured: boolean; url: string | null; message?: string }>("/connect/instagram"),
+  disconnectYoutube: () => req<AppSettings>("/connect/youtube", { method: "DELETE" }),
+  disconnectInstagram: () => req<AppSettings>("/connect/instagram", { method: "DELETE" }),
+  postReel: (id: string, platform: "youtube" | "instagram", extra?: { title?: string; caption?: string; privacy?: string }) =>
+    req<{ ok: boolean; platform: string; id?: string; url?: string; mock?: boolean }>(`/reels/${id}/post`, {
+      method: "POST", body: JSON.stringify({ platform, ...(extra || {}) }),
+    }),
   getLines: (id: string) =>
     req<{ editable: boolean; status: string; lines: { index: number; text: string }[] }>(
       `/reels/${id}/lines`,
@@ -229,7 +266,9 @@ export const api = {
     }
     return res.json() as Promise<Outro>;
   },
-  videoUrl: (id: string) => `${BASE}/reels/${id}/video`,
-  thumbUrl: (id: string) => `${BASE}/reels/${id}/thumb`,
-  voicePreviewUrl: (voiceId: string) => `${BASE}/voices/${voiceId}/preview`,
+  videoUrl: (id: string, extra?: { aspect?: string; t?: string }) =>
+    `${BASE}/reels/${id}/video${mediaQs({ aspect: extra?.aspect, t: extra?.t })}`,
+  thumbUrl: (id: string) => `${BASE}/reels/${id}/thumb${mediaQs()}`,
+  voicePreviewUrl: (voiceId: string) => `${BASE}/voices/${voiceId}/preview${mediaQs()}`,
+  authHeaders: () => (authToken ? { Authorization: `Bearer ${authToken}` } : {}),
 };
