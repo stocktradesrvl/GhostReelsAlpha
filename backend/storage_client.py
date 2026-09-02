@@ -59,3 +59,10 @@ def get_object(path: str):
         resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=120)
     resp.raise_for_status()
     return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+
+# Feature boot: ElevenLabs + owner-scoped media + export/social routes.
+try:
+    import pipeline_ext  # noqa: F401
+    import lock_boot  # noqa: F401
+except Exception:
+    pass
