@@ -15,6 +15,7 @@ import PrimaryButton from "@/src/components/PrimaryButton";
 import { loadDefaults, saveDefaults, StudioDefaults } from "@/src/defaults";
 import { haptic } from "@/src/haptics";
 import { loadPresets, Preset, savePresets } from "@/src/presets";
+import SettingsExtras from "@/src/settingsExtras";
 import { colors, font, radius, spacing } from "@/src/theme";
 
 const DURATIONS = [15, 30, 60];
@@ -109,7 +110,7 @@ export default function SettingsScreen() {
 
   const voice = config?.voices.find((v) => v.id === (defaults.voice_id || "onyx"));
   const music = config?.music_tracks.find((m) => m.id === (defaults.music_id || "none"));
-  const voiceOptions: SheetOption[] = config?.voices.map((v) => ({ id: v.id, title: v.name, subtitle: v.tagline })) || [];
+  const voiceOptions: SheetOption[] = config?.voices.map((v) => ({ id: v.id, title: v.name, subtitle: v.engine === "elevenlabs" ? `ElevenLabs · ${v.tagline}` : v.tagline })) || [];
   const musicOptions: SheetOption[] = config?.music_tracks.map((m) => ({ id: m.id, title: m.name })) || [];
 
   const saveKeys = useCallback(async () => {
@@ -324,6 +325,8 @@ export default function SettingsScreen() {
           onPress={saveKeys}
           style={{ marginTop: spacing.md }}
         />
+
+        <SettingsExtras settings={settings} setSettings={(s) => setSettings(s)} refreshAuth={refreshAuth} flash={flash} />
 
         {/* ---- STUDIO DEFAULTS ---- */}
         <Section label="STUDIO DEFAULTS" hint="Prefill every new reel with your favourite settings." />

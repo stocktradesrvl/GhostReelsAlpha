@@ -1,15 +1,44 @@
 """Static catalogs for voices, caption styles and background gradient themes."""
 
-# OpenAI TTS voices surfaced with friendly, creator-facing names.
-VOICES = [
-    {"id": "onyx", "name": "Atlas", "tagline": "Deep, cinematic narrator", "openai": "onyx"},
-    {"id": "nova", "name": "Nova", "tagline": "Energetic & upbeat", "openai": "nova"},
-    {"id": "shimmer", "name": "Luna", "tagline": "Bright & friendly", "openai": "shimmer"},
-    {"id": "echo", "name": "Echo", "tagline": "Calm & smooth", "openai": "echo"},
-    {"id": "fable", "name": "Fable", "tagline": "Expressive storyteller", "openai": "fable"},
-    {"id": "sage", "name": "Sage", "tagline": "Measured & wise", "openai": "sage"},
+# OpenAI TTS voices (default engine). engine="openai" so the picker can mix in ElevenLabs.
+OPENAI_VOICES = [
+    {"id": "onyx", "name": "Atlas", "tagline": "Deep, cinematic narrator", "openai": "onyx", "engine": "openai"},
+    {"id": "nova", "name": "Nova", "tagline": "Energetic & upbeat", "openai": "nova", "engine": "openai"},
+    {"id": "shimmer", "name": "Luna", "tagline": "Bright & friendly", "openai": "shimmer", "engine": "openai"},
+    {"id": "echo", "name": "Echo", "tagline": "Calm & smooth", "openai": "echo", "engine": "openai"},
+    {"id": "fable", "name": "Fable", "tagline": "Expressive storyteller", "openai": "fable", "engine": "openai"},
+    {"id": "sage", "name": "Sage", "tagline": "Measured & wise", "openai": "sage", "engine": "openai"},
 ]
+
+# ElevenLabs premade voices. `el_id` is the public catalog voice id (not a secret).
+# Used only when the user has saved their own ElevenLabs key (BYOK). OpenAI remains
+# the default; if ElevenLabs is unset we fall back to `openai_fallback`.
+ELEVENLABS_VOICES = [
+    {"id": "el_rachel", "name": "Rachel", "tagline": "Calm, conversational", "engine": "elevenlabs",
+     "el_id": "21m00Tcm4TlvDq8ikWAM", "openai_fallback": "nova"},
+    {"id": "el_domi", "name": "Domi", "tagline": "Strong & confident", "engine": "elevenlabs",
+     "el_id": "AZnzlk1XvdvUeBnXmlld", "openai_fallback": "onyx"},
+    {"id": "el_bella", "name": "Bella", "tagline": "Soft & warm", "engine": "elevenlabs",
+     "el_id": "EXAVITQu4vr4xnSDxMaL", "openai_fallback": "shimmer"},
+    {"id": "el_antoni", "name": "Antoni", "tagline": "Well-rounded narrator", "engine": "elevenlabs",
+     "el_id": "ErXwobaYiN019PkySvjV", "openai_fallback": "echo"},
+    {"id": "el_elli", "name": "Elli", "tagline": "Young & expressive", "engine": "elevenlabs",
+     "el_id": "MF3mGyEYCl7XYWbV9V6O", "openai_fallback": "nova"},
+    {"id": "el_josh", "name": "Josh", "tagline": "Deep & resonant", "engine": "elevenlabs",
+     "el_id": "TxGEqnHWrfWFTfGW9XjX", "openai_fallback": "onyx"},
+]
+
+VOICES = OPENAI_VOICES + ELEVENLABS_VOICES
 VOICE_MAP = {v["id"]: v for v in VOICES}
+
+# Export aspect ratios. 9:16 is the master; 1:1 and 16:9 are recomposed from stored
+# audio + captions + scenes (no LLM/TTS rerun).
+ASPECTS = [
+    {"id": "9:16", "name": "9:16 Vertical", "hint": "Reels / Shorts / TikTok", "width": 1080, "height": 1920},
+    {"id": "1:1", "name": "1:1 Square", "hint": "Feed post", "width": 1080, "height": 1080},
+    {"id": "16:9", "name": "16:9 Landscape", "hint": "YouTube", "width": 1920, "height": 1080},
+]
+ASPECT_MAP = {a["id"]: a for a in ASPECTS}
 
 # Caption highlight color (ASS uses &HBBGGRR&).
 CAPTION_STYLES = [

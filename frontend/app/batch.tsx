@@ -6,7 +6,7 @@ import { Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-nati
 import { KeyboardAwareScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { api, Config } from "@/src/api";
+import { api, Config, voiceSheetOption } from "@/src/api";
 import OptionSheet, { SheetOption } from "@/src/components/OptionSheet";
 import PrimaryButton from "@/src/components/PrimaryButton";
 import { haptic } from "@/src/haptics";
@@ -77,7 +77,7 @@ export default function BatchScreen() {
   const bg = config?.bg_themes.find((b) => b.id === bgTheme);
   const music = config?.music_tracks.find((m) => m.id === musicId);
 
-  const voiceOptions: SheetOption[] = config?.voices.map((v) => ({ id: v.id, title: v.name, subtitle: v.tagline })) || [];
+  const voiceOptions: SheetOption[] = config?.voices.map(voiceSheetOption) || [];
   const bgOptions: SheetOption[] = config?.bg_themes.map((b) => ({ id: b.id, title: b.name, swatch: b.preview })) || [];
   const musicOptions: SheetOption[] = config?.music_tracks.map((m) => ({ id: m.id, title: m.name })) || [];
 

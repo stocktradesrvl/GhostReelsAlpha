@@ -6,7 +6,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { api, Character, Config, Outro } from "@/src/api";
+import { api, Character, Config, Outro, voiceSheetOption } from "@/src/api";
 import OptionSheet, { SheetOption } from "@/src/components/OptionSheet";
 import OutroSheet from "@/src/components/OutroSheet";
 import PrimaryButton from "@/src/components/PrimaryButton";
@@ -45,7 +45,7 @@ export default function NewSeriesScreen() {
   }, []);
 
   const voice = config?.voices.find((v) => v.id === voiceId);
-  const voiceOptions: SheetOption[] = config?.voices.map((v) => ({ id: v.id, title: v.name, subtitle: v.tagline })) || [];
+  const voiceOptions: SheetOption[] = config?.voices.map(voiceSheetOption) || [];
 
   const setChar = (i: number, key: keyof Character, val: string) =>
     setCharacters((cur) => cur.map((c, idx) => (idx === i ? { ...c, [key]: val } : c)));

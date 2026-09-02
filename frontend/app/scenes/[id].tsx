@@ -118,7 +118,7 @@ export default function ScenesEditor() {
           <View key={s.index} style={styles.card} testID={`scene-card-${s.index}`}>
             <View style={styles.imgWrap}>
               <Image
-                source={{ uri: `${api.sceneImageUrl(id!, s.index)}?t=${bust}` }}
+                source={{ uri: api.sceneImageUrl(id!, s.index, { t: String(bust) }) }}
                 style={StyleSheet.absoluteFill}
                 contentFit="cover"
                 cachePolicy="none"
