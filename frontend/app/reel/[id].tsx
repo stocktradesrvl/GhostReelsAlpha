@@ -9,6 +9,7 @@ import { Alert, Linking, Platform, Pressable, StyleSheet, Text, View } from "rea
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api, Reel } from "@/src/api";
+import ExportAndPost from "@/src/exportPost";
 import PreviewPlayer from "@/src/components/PreviewPlayer";
 import PrimaryButton from "@/src/components/PrimaryButton";
 import StageProgress from "@/src/components/StageProgress";
@@ -77,7 +78,7 @@ export default function ReelDetail() {
   const downloadToCache = useCallback(async () => {
     const url = api.videoUrl(id!);
     const dest = `${FileSystem.cacheDirectory}reel-${id}.mp4`;
-    const { uri } = await FileSystem.downloadAsync(url, dest);
+    const { uri } = await FileSystem.downloadAsync(url, dest, { headers: api.authHeaders() as any });
     return uri;
   }, [id]);
 
@@ -258,7 +259,7 @@ export default function ReelDetail() {
       {isReady && (
         <View style={styles.readyWrap}>
           <View style={styles.playerFrame} testID="reel-player">
-            <PreviewPlayer uri={`${api.videoUrl(id!)}?t=${encodeURIComponent(reel?.updated_at || "")}`} testID="video-view" />
+            <PreviewPlayer uri={api.videoUrl(id!, { t: reel?.updated_at || "" })} testID="video-view" />
           </View>
           {toast && (
             <View style={styles.toast} testID="save-toast">
@@ -268,7 +269,7 @@ export default function ReelDetail() {
           <View style={[styles.actions, { paddingBottom: insets.bottom + spacing.md }]}>
             <View style={styles.statsRow}>
               <Text style={styles.meta}>
-                {reel?.duration ? `${reel.duration.toFixed(0)}s` : ""} · 1080×1920
+                {reel?.duration ? `${reel.duration.toFixed(0)}s` : ""} · 1080×1920 master
               </Text>
               <View style={styles.statChip}>
                 <Ionicons name="eye-outline" size={14} color={colors.onSurfaceSecondary} />
@@ -279,6 +280,7 @@ export default function ReelDetail() {
                 <Text style={styles.statTxt} testID="downloads-count">{reel?.downloads ?? 0}</Text>
               </View>
             </View>
+            <ExportAndPost id={id!} reel={reel!} setReel={setReel} showToast={showToast} />
             {Platform.OS === "web" ? (
               <PrimaryButton
                 testID="export-button"
@@ -299,7 +301,7 @@ export default function ReelDetail() {
                 <PrimaryButton
                   testID="export-button"
                   variant="ghost"
-                  label="Post to YouTube / Instagram"
+                  label="Share sheet"
                   icon="share-social-outline"
                   loading={exporting}
                   onPress={exportReel}
