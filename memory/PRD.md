@@ -133,9 +133,9 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
   - Verified via testing agent iteration 9: 6/6 frontend flows pass, no bugs.
 
 ## Backlog
-- P1: multiple caption layout presets; background music track option; ElevenLabs voice option.
-- P2: multi-aspect export (Reels/Shorts variants); onboarding; brand kit (logo watermark).
-- P2: retry queue durability across server restarts; per-user library (auth).
+- P2: onboarding; brand kit (logo watermark).
+- P2: retry queue durability across server restarts.
+- Google/Meta app-review assets (privacy policy URL, demo video, screenshots) after OAuth clients exist — code path is live; console setup is owner-side.
 
 ## App Store readiness fixes (2026-06 · forked) — DONE
 - **Account deletion (Apple 5.1.1(v) blocker):** `DELETE /api/auth/me` purges the user + their reels
@@ -149,10 +149,8 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
 - Support email constant: `SUPPORT_EMAIL` in `src/api.ts` (change if the owner uses a different address).
 
 ## Next tasks
-- **Optional hardening (flagged by tester):** scope `GET /reels/{id}`, `/video`, `/thumb`, `/view`,
-  `/download`, `DELETE /reels/{id}`, and the scene/line regenerate endpoints by `user_id` (currently
-  those reads/actions are uuid-guarded but not auth-scoped).
-- **Full auto-upload** (YouTube/Meta OAuth) — deferred by user until the app has a store build.
+- Paste the YouTube / Instagram developer keys listed in the latest PR once Google Cloud + Meta apps exist (free). Until then, Connect shows a setup message and the native share sheet still works.
+- Redeploy backend so auth-scoped media URLs, ElevenLabs, aspect export, and auto-post go live.
 
 ## RevenueCat subscriptions (2026-06 · batch 13 · forked) — DONE
 - **Emergent-managed RevenueCat** provisioned via integration proxy (`/setup`): project `proja26f3c2c`,
@@ -237,3 +235,28 @@ stage_label, error, duration, word_count, has_video, video_path, thumb_path, cre
   builtin reroutes to Universal 200) + frontend toggle UX. **User must redeploy for prod.** Immediate
   workaround for the user: switch AI engine to "Built-in credits" (uses the 100 Universal credits) OR add
   billing/credits to their OpenAI + Gemini accounts.
+
+## Follow-up (2026-09 · lock + voices + sizes + autopost) — DONE
+
+- **Auth-scope remaining reel endpoints:** `GET /reels/{id}` and DELETE were already owner-scoped.
+  `GET /video`, `/thumb`, scene images, `POST /view`, `/download` now require the signed-in owner
+  (401 unauthenticated, 404 cross-user — no existence leak). Player/library/scene editor keep working
+  by appending the JWT as `?access_token=` on media URLs (video tags cannot send Authorization).
+  Instagram fetch uses a short-lived HMAC `media_sig` minted only when the owner posts. Quota,
+  RevenueCat, and existing JWT auth are unchanged.
+- **ElevenLabs voices:** catalog mixed into `/api/config` (`el_rachel` etc., `engine=elevenlabs`).
+  BYOK `elevenlabs_key_enc` AES-GCM like OpenAI/Google; `key_mode` own vs builtin; `error_code=key`
+  on auth/billing. OpenAI TTS stays default; EL voices fall back to a similar OpenAI voice if no EL
+  key. Preview: `GET /api/voices/{id}/preview` (auth). Per-line regen uses the chosen engine.
+  **No hardcoded API key.**
+- **Multi-aspect export:** from a finished reel, 9:16 (1080×1920 master), 1:1, 16:9. Recompose from
+  stored audio+captions+scenes — no LLM/TTS rerun. Reel detail shows EXPORT SIZE chips. Master
+  status stays `ready` while variants render.
+- **YouTube + Instagram auto-post:** real OAuth (`GET /api/connect/{youtube|instagram}` + callback),
+  tokens AES-encrypted per user, never logged. `POST /api/reels/{id}/post`. Native share sheet kept.
+  Env vars (no secrets in repo): `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`,
+  `YOUTUBE_REDIRECT_URI` (or `PUBLIC_BASE_URL` + `/api/connect/youtube/callback`); `META_APP_ID`,
+  `META_APP_SECRET`, `INSTAGRAM_REDIRECT_URI` (or `PUBLIC_BASE_URL` + `/api/connect/instagram/callback`);
+  `PUBLIC_BASE_URL` must be public https for Instagram to fetch the video.
+- Tests: `backend/tests/test_auth_scope_remaining.py`, `test_voices_aspect_social.py`. Use REELS_MOCK=1;
+  must stay 0 in production.
