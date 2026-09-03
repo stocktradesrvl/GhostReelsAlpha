@@ -11,6 +11,7 @@ import OptionSheet, { SheetOption } from "@/src/components/OptionSheet";
 import OutroSheet from "@/src/components/OutroSheet";
 import PrimaryButton from "@/src/components/PrimaryButton";
 import Segmented from "@/src/components/Segmented";
+import AiImageControls from "@/src/components/AiImageControls";
 import { haptic } from "@/src/haptics";
 import { colors, font, radius, spacing } from "@/src/theme";
 
@@ -26,6 +27,8 @@ export default function NewSeriesScreen() {
   const [tone, setTone] = useState("");
   const [visualMode, setVisualMode] = useState<"gradient" | "ai">("ai");
   const [imageStyle, setImageStyle] = useState("cinematic");
+  const [imageCount, setImageCount] = useState<number | null>(null);
+  const [imageDirection, setImageDirection] = useState("");
   const [voiceId, setVoiceId] = useState("onyx");
   const [seconds, setSeconds] = useState(30);
   const [outro, setOutro] = useState<Outro | null>(null);
@@ -83,6 +86,8 @@ export default function NewSeriesScreen() {
         characters: cleaned,
         visual_mode: visualMode,
         image_style: imageStyle,
+        image_count: visualMode === "ai" ? (imageCount ?? undefined) : undefined,
+        image_direction: visualMode === "ai" ? (imageDirection.trim() || undefined) : undefined,
         voice_id: voiceId,
         seconds,
         outro_id: outro?.id || undefined,
@@ -95,7 +100,7 @@ export default function NewSeriesScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [title, premise, tone, characters, visualMode, imageStyle, voiceId, seconds, outro, router]);
+  }, [title, premise, tone, characters, visualMode, imageStyle, imageCount, imageDirection, voiceId, seconds, outro, router]);
 
   return (
     <View style={styles.root}>
@@ -205,19 +210,16 @@ export default function NewSeriesScreen() {
           <Text style={styles.helper}>AI images keep your characters consistent across episodes (uses a few extra credits per reel).</Text>
         )}
         {visualMode === "ai" && (
-          <>
-            <Text style={styles.section}>IMAGE STYLE</Text>
-            <View style={styles.chipRow}>
-              {(config?.image_styles || []).map((o) => {
-                const active = o.id === imageStyle;
-                return (
-                  <Pressable key={o.id} testID={`series-img-${o.id}`} onPress={() => { haptic.light(); setImageStyle(o.id); }} style={[styles.chip, active && styles.chipActive]}>
-                    <Text style={[styles.chipText, active && styles.chipTextActive]}>{o.name}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </>
+          <AiImageControls
+            testPrefix="series"
+            styles={config?.image_styles || []}
+            imageStyle={imageStyle}
+            onStyle={setImageStyle}
+            imageCount={imageCount}
+            onCount={setImageCount}
+            direction={imageDirection}
+            onDirection={setImageDirection}
+          />
         )}
 
         <Text style={styles.section}>EPISODE LENGTH</Text>
