@@ -25,6 +25,8 @@ export default function ScenesEditor() {
   const [busyIndex, setBusyIndex] = useState<number | null>(null);
   const [bust, setBust] = useState(Date.now());
   const [error, setError] = useState<string | null>(null);
+  const [direction, setDirection] = useState("");
+  const [imageStyle, setImageStyle] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
@@ -34,6 +36,8 @@ export default function ScenesEditor() {
       setScenes(data.scenes);
       setEditable(data.editable);
       setStatus(data.status);
+      if (data.image_direction) setDirection(data.image_direction);
+      if (data.image_style) setImageStyle(data.image_style);
       setPrompts((cur) => {
         const next = { ...cur };
         data.scenes.forEach((s) => { if (next[s.index] === undefined) next[s.index] = s.prompt; });
@@ -100,8 +104,13 @@ export default function ScenesEditor() {
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.lead}>
-          Tweak a scene's prompt and regenerate just that visual — your voice and captions stay exactly the same.
+          Tweak a scene's prompt and regenerate just that visual — your voice and captions stay exactly the same. Style and mood from this reel are kept.
         </Text>
+        {!!(direction || imageStyle) && (
+          <Text style={styles.dirNote} testID="scenes-direction">
+            {[imageStyle && `Style: ${imageStyle}`, direction && `Mood: ${direction}`].filter(Boolean).join(" · ")}
+          </Text>
+        )}
 
         {working && (
           <View style={styles.workingBar} testID="scenes-working">
@@ -169,6 +178,7 @@ const styles = StyleSheet.create({
   lead: { fontFamily: font.body, fontSize: 13, color: colors.onSurfaceSecondary, lineHeight: 19, marginBottom: spacing.md },
   workingBar: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.brandTertiary, borderWidth: 1, borderColor: colors.brandPrimary, marginBottom: spacing.md },
   workingTxt: { fontFamily: font.bodySemi, fontSize: 13, color: colors.onBrandTertiary },
+  dirNote: { fontFamily: font.bodyMed, fontSize: 12, color: colors.brandSecondary, marginBottom: spacing.md },
   notEditable: { fontFamily: font.body, fontSize: 13, color: colors.onSurfaceSecondary, marginBottom: spacing.md },
   card: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: spacing.md, marginBottom: spacing.lg },
   imgWrap: { width: "100%", aspectRatio: 9 / 16, maxHeight: 320, borderRadius: radius.md, overflow: "hidden", backgroundColor: colors.surfaceTertiary, alignSelf: "center" },
