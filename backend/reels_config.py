@@ -1,5 +1,6 @@
 """Static catalogs for voices, caption styles and background gradient themes."""
 
+# OpenAI TTS voices surfaced with friendly, creator-facing names.
 # OpenAI TTS voices (default engine). engine="openai" so the picker can mix in ElevenLabs.
 OPENAI_VOICES = [
     {"id": "onyx", "name": "Atlas", "tagline": "Deep, cinematic narrator", "openai": "onyx", "engine": "openai"},
@@ -117,8 +118,18 @@ IMAGE_STYLES = [
     {"id": "photoreal", "name": "Photoreal", "suffix": "ultra photorealistic, 8k, natural realistic lighting, lifelike detail"},
     {"id": "anime", "name": "Anime", "suffix": "anime illustration, vibrant colors, clean linework, studio quality"},
     {"id": "painterly", "name": "Painterly", "suffix": "digital painting, concept art, artstation, dramatic brushwork"},
+    {"id": "cartoon", "name": "Cartoon", "suffix": "bold cartoon illustration, clean outlines, expressive shapes, cel-shaded, not photoreal"},
+    {"id": "comic", "name": "Comic book", "suffix": "comic book panel, inked linework, dramatic halftone shading, graphic novel coloring"},
+    {"id": "noir", "name": "Noir", "suffix": "high-contrast film noir, deep shadows, venetian-blind lighting, grainy black-and-white cinematic still"},
+    {"id": "illustrated", "name": "Illustrated", "suffix": "storybook illustration, detailed ink and watercolor, editorial narrative art"},
+    {"id": "3d", "name": "3D render", "suffix": "cinematic 3D render, octane, volumetric lighting, highly detailed digital sculpture"},
 ]
 IMAGE_STYLE_MAP = {s["id"]: s for s in IMAGE_STYLES}
+
+# User-picked AI image count. None/omitted = auto from duration (scene_count).
+IMAGE_COUNT_MIN = 2
+IMAGE_COUNT_MAX = 12
+IMAGE_DIRECTION_MAX = 120
 
 # Background motion -> gradient animation speed (higher = colors shift faster).
 BG_MOTIONS = [
