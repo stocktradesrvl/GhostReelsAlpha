@@ -20,7 +20,7 @@ import Segmented from "@/src/components/Segmented";
 import AiImageControls from "@/src/components/AiImageControls";
 import { ChipSelector, ColorField, SettingRow, styles } from "@/src/components/CreateStudioBits";
 import { haptic } from "@/src/haptics";
-import { colors } from "@/src/theme";
+import { colors, spacing } from "@/src/theme";
 
 const DURATIONS = [15, 30, 60];
 
