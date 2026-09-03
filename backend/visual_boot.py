@@ -1,8 +1,7 @@
 """Boot hook: user-picked AI image count, mood/direction, extra styles.
 
-Imported from storage_client (before lock_boot) so apply_lock runs, then we
-add image_count/image_direction to request models and wrap the pipeline.
-Does not rewrite server.py or weaken auth/quota/RevenueCat.
+Imported from storage_client before lock_boot so apply_lock runs first, then we
+add image_count/image_direction without rewriting server.py. Auth/quota/RevenueCat stay as-is.
 """
 from __future__ import annotations
 
@@ -127,10 +126,35 @@ def apply_visual(router) -> None:
 
     S.regenerate_scene_task = regenerate_scene_task
 
+    _drop_method(router, "/config", "GET")
     _drop_method(router, "/reels", "POST")
     _drop_method(router, "/reels/batch", "POST")
     _drop_method(router, "/series", "POST")
     _drop_method(router, "/reels/{reel_id}/scenes", "GET")
+
+    @router.get("/config")
+    async def get_config():
+        from reels_config import (
+            ASPECTS, BG_MOTIONS, BG_THEMES, CAPTION_ANIMS, CAPTION_FONTS, CAPTION_POSITIONS,
+            CAPTION_SIZES, CAPTION_STYLES, IMAGE_COUNT_MAX, IMAGE_COUNT_MIN, IMAGE_STYLES,
+            MUSIC_TRACKS, VOICE_SPEEDS, VOICES,
+        )
+        return {
+            "voices": [{k: v.get(k) for k in ("id", "name", "tagline", "engine") if k in v} for v in VOICES],
+            "voice_speeds": VOICE_SPEEDS,
+            "image_styles": IMAGE_STYLES,
+            "image_count_min": IMAGE_COUNT_MIN,
+            "image_count_max": IMAGE_COUNT_MAX,
+            "caption_styles": CAPTION_STYLES,
+            "caption_positions": CAPTION_POSITIONS,
+            "caption_sizes": CAPTION_SIZES,
+            "caption_fonts": CAPTION_FONTS,
+            "caption_anims": CAPTION_ANIMS,
+            "bg_themes": BG_THEMES,
+            "bg_motions": BG_MOTIONS,
+            "music_tracks": MUSIC_TRACKS,
+            "aspects": ASPECTS,
+        }
 
     @router.post("/reels")
     async def create_reel(req: CreateX, user=Depends(S.current_user)):
