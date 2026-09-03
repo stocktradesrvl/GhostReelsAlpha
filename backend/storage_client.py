@@ -63,6 +63,13 @@ def get_object(path: str):
 # Feature boot: ElevenLabs + owner-scoped media + export/social routes.
 try:
     import pipeline_ext  # noqa: F401
+except Exception:
+    pass
+try:
+    import visual_boot  # noqa: F401
+except Exception:
+    pass
+try:
     import lock_boot  # noqa: F401
 except Exception:
     pass
