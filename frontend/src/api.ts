@@ -20,6 +20,8 @@ export type Config = {
   voices: Voice[];
   voice_speeds: VoiceSpeed[];
   image_styles: ImageStyle[];
+  image_count_min?: number;
+  image_count_max?: number;
   caption_styles: CaptionStyle[];
   caption_positions: CaptionPosition[];
   caption_sizes: CaptionSize[];
@@ -46,6 +48,8 @@ export type Reel = {
   seconds: number;
   visual_mode: string;
   image_style: string;
+  image_count?: number | null;
+  image_direction?: string;
   voice_id: string;
   voice_speed: string;
   caption_style: string;
@@ -212,7 +216,7 @@ export const api = {
     }),
   deleteSeries: (id: string) => req<{ ok: boolean }>(`/series/${id}`, { method: "DELETE" }),
   getScenes: (id: string) =>
-    req<{ editable: boolean; status: string; scenes: { index: number; prompt: string; image_url: string }[] }>(
+    req<{ editable: boolean; status: string; image_direction?: string; image_style?: string; scenes: { index: number; prompt: string; image_url: string }[] }>(
       `/reels/${id}/scenes`,
     ),
   regenerateScene: (id: string, index: number, prompt?: string) =>
@@ -220,7 +224,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ prompt: prompt || null }),
     }),
-  sceneImageUrl: (id: string, index: number, extra?: { t?: string }) => `${BASE}/reels/${id}/scene/${index}/image${mediaQs({ t: extra?.t })}`,
+  sceneImageUrl: (id: string, index: number, extra?: { t?: string }) => `${BASE}/reels/${id}/scene/${index}/image${mediaQs({ t: extra?.t }) }`,
   getSettings: () => req<AppSettings>("/settings"),
   updateSettings: (payload: { openai_key?: string; google_key?: string; elevenlabs_key?: string; brand_handle?: string; key_mode?: "own" | "builtin" }) =>
     req<AppSettings>("/settings", { method: "PUT", body: JSON.stringify(payload) }),
@@ -267,7 +271,7 @@ export const api = {
     return res.json() as Promise<Outro>;
   },
   videoUrl: (id: string, extra?: { aspect?: string; t?: string }) =>
-    `${BASE}/reels/${id}/video${mediaQs({ aspect: extra?.aspect, t: extra?.t })}`,
+    `${BASE}/reels/${id}/video${mediaQs({ aspect: extra?.aspect, t: extra?.t }) }`,
   thumbUrl: (id: string) => `${BASE}/reels/${id}/thumb${mediaQs()}`,
   voicePreviewUrl: (voiceId: string) => `${BASE}/voices/${voiceId}/preview${mediaQs()}`,
   authHeaders: () => (authToken ? { Authorization: `Bearer ${authToken}` } : {}),

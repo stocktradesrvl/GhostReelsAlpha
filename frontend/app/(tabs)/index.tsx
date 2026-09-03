@@ -3,11 +3,11 @@ import { Ionicons } from "@expo/vector-icons";
 import Slider from "@react-native-community/slider";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Pressable, Switch, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { api, Config, Outro } from "@/src/api";
+import { api, Config, Outro, voiceSheetOption } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { playPreview, stopPreview } from "@/src/audioPreview";
 import OptionSheet, { SheetOption } from "@/src/components/OptionSheet";
@@ -17,8 +17,10 @@ import { loadDefaults } from "@/src/defaults";
 import { useHidingTabBar } from "@/src/tabbar";
 import PrimaryButton from "@/src/components/PrimaryButton";
 import Segmented from "@/src/components/Segmented";
+import AiImageControls from "@/src/components/AiImageControls";
+import { ChipSelector, ColorField, SettingRow, styles } from "@/src/components/CreateStudioBits";
 import { haptic } from "@/src/haptics";
-import { colors, font, radius, spacing } from "@/src/theme";
+import { colors, spacing } from "@/src/theme";
 
 const DURATIONS = [15, 30, 60];
 
@@ -32,6 +34,8 @@ export default function CreateScreen() {
   const [mode, setMode] = useState<"topic" | "script">("topic");
   const [visualMode, setVisualMode] = useState<"gradient" | "ai">("gradient");
   const [imageStyle, setImageStyle] = useState("cinematic");
+  const [imageCount, setImageCount] = useState<number | null>(null);
+  const [imageDirection, setImageDirection] = useState("");
   const [creditWarn, setCreditWarn] = useState(false);
   const [quotaHit, setQuotaHit] = useState(false);
   const { refresh: refreshAuth } = useAuth();
@@ -68,7 +72,6 @@ export default function CreateScreen() {
   const outroSheet = useRef<BottomSheetModal>(null);
   const scrollHide = useHidingTabBar();
 
-  // Load studio defaults (set in Settings) to prefill new reels — skipped when duplicating.
   useEffect(() => {
     if (params.dup) return;
     loadDefaults().then((d) => {
@@ -82,7 +85,7 @@ export default function CreateScreen() {
   }, []);
 
   const currentSettings = {
-    seconds, visual_mode: visualMode, image_style: imageStyle, voice_id: voiceId, voice_speed: voiceSpeed, caption_style: captionStyle,
+    seconds, visual_mode: visualMode, image_style: imageStyle, image_count: imageCount, image_direction: imageDirection, voice_id: voiceId, voice_speed: voiceSpeed, caption_style: captionStyle,
     caption_position: captionPosition, caption_size: captionSize, caption_font: captionFont,
     caption_anim: captionAnim, bg_theme: bgTheme, bg_motion: bgMotion, music_id: musicId,
     music_volume: musicVolume, watermark, hook_enabled: hookEnabled, endcard_text: endcardText,
@@ -93,6 +96,9 @@ export default function CreateScreen() {
     if (s.seconds != null) setSeconds(s.seconds);
     if (s.visual_mode) setVisualMode(s.visual_mode);
     if (s.image_style) setImageStyle(s.image_style);
+    if (s.image_count != null) setImageCount(s.image_count);
+    else setImageCount(null);
+    setImageDirection(s.image_direction || "");
     if (s.voice_id) setVoiceId(s.voice_id);
     if (s.voice_speed) setVoiceSpeed(s.voice_speed);
     if (s.caption_style) setCaptionStyle(s.caption_style);
@@ -141,6 +147,8 @@ export default function CreateScreen() {
       setSeconds(r.seconds);
       if (r.visual_mode) setVisualMode(r.visual_mode);
       if (r.image_style) setImageStyle(r.image_style);
+      setImageCount(r.image_count != null ? r.image_count : null);
+      setImageDirection(r.image_direction || "");
       setVoiceId(r.voice_id);
       setVoiceSpeed(r.voice_speed);
       setCaptionStyle(r.caption_style);
@@ -184,7 +192,7 @@ export default function CreateScreen() {
   const music = config?.music_tracks.find((m) => m.id === musicId);
 
   const voiceOptions: SheetOption[] =
-    config?.voices.map((v) => ({ id: v.id, title: v.name, subtitle: v.tagline })) || [];
+    config?.voices.map(voiceSheetOption) || [];
   const captionOptions: SheetOption[] =
     config?.caption_styles.map((c) => ({ id: c.id, title: c.name, subtitle: c.hint, dot: c.hex })) || [];
   const bgOptions: SheetOption[] = [
@@ -228,6 +236,8 @@ export default function CreateScreen() {
         seconds,
         visual_mode: visualMode,
         image_style: imageStyle,
+        image_count: visualMode === "ai" ? (imageCount ?? undefined) : undefined,
+        image_direction: visualMode === "ai" ? (imageDirection.trim() || undefined) : undefined,
         voice_id: voiceId,
         voice_speed: voiceSpeed,
         caption_style: captionStyle,
@@ -260,7 +270,7 @@ export default function CreateScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [canGenerate, mode, topic, script, seconds, visualMode, imageStyle, voiceId, voiceSpeed, captionStyle, captionPosition, captionSize, captionFont, captionAnim, bgTheme, bgMotion, customC1, customC2, musicId, musicVolume, watermark, hookEnabled, endcardText, outro, router]);
+  }, [canGenerate, mode, topic, script, seconds, visualMode, imageStyle, imageCount, imageDirection, voiceId, voiceSpeed, captionStyle, captionPosition, captionSize, captionFont, captionAnim, bgTheme, bgMotion, customC1, customC2, musicId, musicVolume, watermark, hookEnabled, endcardText, outro, router]);
 
   return (
     <View style={styles.root}>
@@ -330,15 +340,15 @@ export default function CreateScreen() {
           </Text>
         )}
         {visualMode === "ai" && (
-          <>
-            <Text style={styles.section}>IMAGE STYLE</Text>
-            <ChipSelector
-              testID="image-style"
-              options={config?.image_styles || []}
-              value={imageStyle}
-              onChange={setImageStyle}
-            />
-          </>
+          <AiImageControls
+            styles={config?.image_styles || []}
+            imageStyle={imageStyle}
+            onStyle={setImageStyle}
+            imageCount={imageCount}
+            onCount={setImageCount}
+            direction={imageDirection}
+            onDirection={setImageDirection}
+          />
         )}
 
         {mode === "topic" ? (
@@ -430,52 +440,15 @@ export default function CreateScreen() {
           </Pressable>
         </View>
         <View style={styles.settings}>
-          <SettingRow
-            testID="setting-voice"
-            icon="mic"
-            label="Voice"
-            value={voice?.name || "—"}
-            onPress={() => voiceSheet.current?.present()}
-          />
-          <SettingRow
-            testID="setting-caption"
-            icon="text"
-            label="Captions"
-            value={caption?.name || "—"}
-            dot={caption?.hex}
-            onPress={() => captionSheet.current?.present()}
-          />
-          <SettingRow
-            testID="setting-bg"
-            icon="color-palette"
-            label="Background"
-            value={bgTheme === "custom" ? "Custom" : (bg?.name || "—")}
-            swatch={bgTheme === "custom" ? [customC2, customC1] : bg?.preview}
-            onPress={() => bgSheet.current?.present()}
-          />
-          <SettingRow
-            testID="setting-music"
-            icon="musical-notes"
-            label="Music"
-            value={music?.name || "—"}
-            onPress={() => musicSheet.current?.present()}
-          />
-          <SettingRow
-            testID="setting-outro"
-            icon="play-forward"
-            label="Outro clip"
-            value={outro ? outro.name : "None"}
-            onPress={() => outroSheet.current?.present()}
-          />
+          <SettingRow testID="setting-voice" icon="mic" label="Voice" value={voice?.name || "—"} onPress={() => voiceSheet.current?.present()} />
+          <SettingRow testID="setting-caption" icon="text" label="Captions" value={caption?.name || "—"} dot={caption?.hex} onPress={() => captionSheet.current?.present()} />
+          <SettingRow testID="setting-bg" icon="color-palette" label="Background" value={bgTheme === "custom" ? "Custom" : (bg?.name || "—")} swatch={bgTheme === "custom" ? [customC2, customC1] : bg?.preview} onPress={() => bgSheet.current?.present()} />
+          <SettingRow testID="setting-music" icon="musical-notes" label="Music" value={music?.name || "—"} onPress={() => musicSheet.current?.present()} />
+          <SettingRow testID="setting-outro" icon="play-forward" label="Outro clip" value={outro ? outro.name : "None"} onPress={() => outroSheet.current?.present()} />
         </View>
 
         <Text style={styles.section}>NARRATION SPEED</Text>
-        <ChipSelector
-          testID="voice-speed"
-          options={config?.voice_speeds || []}
-          value={voiceSpeed}
-          onChange={setVoiceSpeed}
-        />
+        <ChipSelector testID="voice-speed" options={config?.voice_speeds || []} value={voiceSpeed} onChange={setVoiceSpeed} />
 
         {musicId !== "none" && (
           <>
@@ -499,44 +472,19 @@ export default function CreateScreen() {
         )}
 
         <Text style={styles.section}>CAPTION POSITION</Text>
-        <ChipSelector
-          testID="caption-position"
-          options={config?.caption_positions || []}
-          value={captionPosition}
-          onChange={setCaptionPosition}
-        />
+        <ChipSelector testID="caption-position" options={config?.caption_positions || []} value={captionPosition} onChange={setCaptionPosition} />
 
         <Text style={styles.section}>CAPTION SIZE</Text>
-        <ChipSelector
-          testID="caption-size"
-          options={config?.caption_sizes || []}
-          value={captionSize}
-          onChange={setCaptionSize}
-        />
+        <ChipSelector testID="caption-size" options={config?.caption_sizes || []} value={captionSize} onChange={setCaptionSize} />
 
         <Text style={styles.section}>CAPTION FONT</Text>
-        <ChipSelector
-          testID="caption-font"
-          options={config?.caption_fonts || []}
-          value={captionFont}
-          onChange={setCaptionFont}
-        />
+        <ChipSelector testID="caption-font" options={config?.caption_fonts || []} value={captionFont} onChange={setCaptionFont} />
 
         <Text style={styles.section}>CAPTION ANIMATION</Text>
-        <ChipSelector
-          testID="caption-anim"
-          options={config?.caption_anims || []}
-          value={captionAnim}
-          onChange={setCaptionAnim}
-        />
+        <ChipSelector testID="caption-anim" options={config?.caption_anims || []} value={captionAnim} onChange={setCaptionAnim} />
 
         <Text style={styles.section}>BACKGROUND MOTION</Text>
-        <ChipSelector
-          testID="bg-motion"
-          options={config?.bg_motions || []}
-          value={bgMotion}
-          onChange={setBgMotion}
-        />
+        <ChipSelector testID="bg-motion" options={config?.bg_motions || []} value={bgMotion} onChange={setBgMotion} />
 
         {bgTheme === "custom" && (
           <>
@@ -633,288 +581,3 @@ export default function CreateScreen() {
     </View>
   );
 }
-
-function SettingRow({
-  icon,
-  label,
-  value,
-  onPress,
-  dot,
-  swatch,
-  testID,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  value: string;
-  onPress: () => void;
-  dot?: string;
-  swatch?: string[];
-  testID?: string;
-}) {
-  return (
-    <Pressable
-      testID={testID}
-      onPress={() => {
-        haptic.select();
-        onPress();
-      }}
-      style={({ pressed }) => [styles.settingRow, pressed && { backgroundColor: colors.surfaceTertiary }]}
-    >
-      <View style={styles.settingLeft}>
-        <Ionicons name={icon} size={18} color={colors.onSurfaceSecondary} />
-        <Text style={styles.settingLabel}>{label}</Text>
-      </View>
-      <View style={styles.settingRight}>
-        {dot && <View style={[styles.miniDot, { backgroundColor: dot }]} />}
-        {swatch && (
-          <View style={styles.miniSwatchWrap}>
-            {swatch.map((c, i) => (
-              <View key={i} style={[styles.miniSwatch, { backgroundColor: c }]} />
-            ))}
-          </View>
-        )}
-        <Text style={styles.settingValue}>{value}</Text>
-        <Ionicons name="chevron-forward" size={16} color={colors.onSurfaceSecondary} />
-      </View>
-    </Pressable>
-  );
-}
-
-function ChipSelector({
-  options,
-  value,
-  onChange,
-  testID,
-}: {
-  options: { id: string; name: string }[];
-  value: string;
-  onChange: (id: string) => void;
-  testID?: string;
-}) {
-  return (
-    <View style={styles.chipRow} testID={testID}>
-      {options.map((o) => {
-        const active = o.id === value;
-        return (
-          <Pressable
-            key={o.id}
-            testID={`${testID}-${o.id}`}
-            onPress={() => {
-              haptic.light();
-              onChange(o.id);
-            }}
-            style={[styles.chip, active && styles.chipActive]}
-          >
-            <Text style={[styles.chipText, active && styles.chipTextActive]}>{o.name}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
-function ColorField({
-  value,
-  onChange,
-  testID,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  testID?: string;
-}) {
-  const v = value.trim();
-  const valid = /^#?[0-9a-fA-F]{6}$/.test(v);
-  const swatch = valid ? (v.startsWith("#") ? v : `#${v}`) : "#000000";
-  return (
-    <View style={styles.colorField}>
-      <View style={[styles.colorSwatch, { backgroundColor: swatch }]} />
-      <TextInput
-        testID={testID}
-        value={value}
-        onChangeText={onChange}
-        autoCapitalize="characters"
-        autoCorrect={false}
-        maxLength={7}
-        placeholder="#RRGGBB"
-        placeholderTextColor={colors.onSurfaceSecondary}
-        style={styles.colorInput}
-      />
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.surface },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  brand: { fontFamily: font.display, fontSize: 26, color: colors.onSurface, letterSpacing: 1 },
-  sub: { fontFamily: font.body, fontSize: 12, color: colors.onSurfaceSecondary, marginTop: 2 },
-  aiNote: { fontFamily: font.body, fontSize: 12, color: colors.brandSecondary, marginTop: spacing.sm, lineHeight: 17 },
-  creditBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: "rgba(234,179,8,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(234,179,8,0.35)",
-  },
-  creditText: { flex: 1, fontFamily: font.bodyMed, fontSize: 12, color: colors.warning, lineHeight: 16 },
-  headerRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  batchBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    paddingHorizontal: spacing.md,
-    height: 40,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceSecondary,
-  },
-  batchTxt: { fontFamily: font.bodySemi, fontSize: 13, color: colors.onSurface },
-  sectionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  presetPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    marginTop: spacing.lg,
-    paddingHorizontal: spacing.md,
-    height: 30,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.brandPrimary,
-    backgroundColor: colors.brandTertiary,
-  },
-  presetPillTxt: { fontFamily: font.bodySemi, fontSize: 12, color: colors.onBrandTertiary },
-  logo: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.md,
-    backgroundColor: colors.brandTertiary,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: colors.brandPrimary,
-  },
-  section: {
-    fontFamily: font.bodyBold,
-    fontSize: 11,
-    letterSpacing: 1.2,
-    color: colors.onSurfaceSecondary,
-    marginTop: spacing.lg,
-    marginBottom: spacing.sm,
-  },
-  input: {
-    backgroundColor: colors.surfaceSecondary,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    fontFamily: font.body,
-    fontSize: 15,
-    color: colors.onSurface,
-    textAlignVertical: "top",
-  },
-  chipRow: { flexDirection: "row", gap: spacing.sm },
-  colorRow: { flexDirection: "row", gap: spacing.sm },
-  colorField: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    backgroundColor: colors.surfaceSecondary,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    height: 48,
-  },
-  colorSwatch: { width: 24, height: 24, borderRadius: 6, borderWidth: 1, borderColor: colors.borderStrong },
-  colorInput: { flex: 1, fontFamily: font.bodyMed, fontSize: 15, color: colors.onSurface },
-  chip: {
-    flex: 1,
-    height: 44,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceSecondary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  chipActive: { borderColor: colors.brand, backgroundColor: colors.brandTertiary },
-  chipText: { fontFamily: font.bodySemi, fontSize: 14, color: colors.onSurfaceSecondary },
-  chipTextActive: { color: colors.onBrandTertiary },
-  scriptHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  wordCount: { fontFamily: font.bodyMed, fontSize: 11, color: colors.onSurfaceSecondary, marginTop: spacing.lg },
-  settings: {
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceSecondary,
-    overflow: "hidden",
-  },
-  settingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.md,
-    height: 54,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.divider,
-  },
-  settingLeft: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  settingLabel: { fontFamily: font.bodySemi, fontSize: 15, color: colors.onSurface },
-  settingRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  settingValue: { fontFamily: font.bodyMed, fontSize: 14, color: colors.onSurfaceSecondary },
-  toggleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: spacing.lg,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceSecondary,
-  },
-  toggleSub: { fontFamily: font.body, fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 2 },
-  miniDot: { width: 12, height: 12, borderRadius: 6 },
-  miniSwatchWrap: { flexDirection: "row", borderRadius: radius.sm, overflow: "hidden" },
-  miniSwatch: { width: 8, height: 16 },
-  errorBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    marginTop: spacing.lg,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: "rgba(239,68,68,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(239,68,68,0.3)",
-  },
-  errorText: { flex: 1, fontFamily: font.bodyMed, fontSize: 13, color: colors.brandSecondary },
-  ctaWrap: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    backgroundColor: colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  ctaHint: {
-    fontFamily: font.body,
-    fontSize: 12,
-    color: colors.onSurfaceSecondary,
-    textAlign: "center",
-    marginBottom: spacing.sm,
-  },
-});

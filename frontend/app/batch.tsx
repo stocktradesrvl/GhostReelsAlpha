@@ -9,6 +9,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, Config, voiceSheetOption } from "@/src/api";
 import OptionSheet, { SheetOption } from "@/src/components/OptionSheet";
 import PrimaryButton from "@/src/components/PrimaryButton";
+import Segmented from "@/src/components/Segmented";
+import AiImageControls from "@/src/components/AiImageControls";
 import { haptic } from "@/src/haptics";
 import { colors, font, radius, spacing } from "@/src/theme";
 
@@ -21,6 +23,10 @@ export default function BatchScreen() {
   const [config, setConfig] = useState<Config | null>(null);
   const [topicsText, setTopicsText] = useState("");
   const [seconds, setSeconds] = useState(30);
+  const [visualMode, setVisualMode] = useState<"gradient" | "ai">("gradient");
+  const [imageStyle, setImageStyle] = useState("cinematic");
+  const [imageCount, setImageCount] = useState<number | null>(null);
+  const [imageDirection, setImageDirection] = useState("");
   const [voiceId, setVoiceId] = useState("onyx");
   const [captionFont, setCaptionFont] = useState("barlow");
   const [bgTheme, setBgTheme] = useState("ember");
@@ -98,6 +104,9 @@ export default function BatchScreen() {
         topics, seconds, voice_id: voiceId, caption_font: captionFont,
         caption_anim: "pop", bg_theme: bgTheme, bg_motion: "dynamic",
         music_id: musicId, hook_enabled: hookEnabled, scheduled_at,
+        visual_mode: visualMode, image_style: imageStyle,
+        image_count: visualMode === "ai" ? (imageCount ?? undefined) : undefined,
+        image_direction: visualMode === "ai" ? (imageDirection.trim() || undefined) : undefined,
         scripts: drafts.length ? drafts : undefined,
       });
       haptic.heavy();
@@ -109,7 +118,7 @@ export default function BatchScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [topics, seconds, voiceId, captionFont, bgTheme, musicId, hookEnabled, whenMode, drafts, router]);
+  }, [topics, seconds, visualMode, imageStyle, imageCount, imageDirection, voiceId, captionFont, bgTheme, musicId, hookEnabled, whenMode, drafts, router]);
 
   return (
     <View style={styles.root}>
@@ -142,6 +151,26 @@ export default function BatchScreen() {
           multiline
           style={[styles.input, { minHeight: 160 }]}
         />
+
+        <Text style={styles.section}>VISUAL STYLE</Text>
+        <Segmented
+          testID="batch-visual-mode"
+          options={[{ id: "gradient", label: "GRADIENT" }, { id: "ai", label: "AI IMAGES" }]}
+          value={visualMode}
+          onChange={(v) => setVisualMode(v as "gradient" | "ai")}
+        />
+        {visualMode === "ai" && (
+          <AiImageControls
+            testPrefix="batch"
+            styles={config?.image_styles || []}
+            imageStyle={imageStyle}
+            onStyle={setImageStyle}
+            imageCount={imageCount}
+            onCount={setImageCount}
+            direction={imageDirection}
+            onDirection={setImageDirection}
+          />
+        )}
 
         <Text style={styles.section}>LENGTH</Text>
         <View style={styles.chipRow}>
